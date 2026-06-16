@@ -66,6 +66,7 @@ export const createReminder = async (req, res) => {
         recurringFrequency,
         subscription,
         note,
+        timezone,
     } = req.body;
     const userId = req.user.userId;
 
@@ -109,6 +110,7 @@ export const createReminder = async (req, res) => {
             recurringFrequency,
             subscription: savedSubscription ? savedSubscription._id : null,
             note,
+            timezone: timezone || 'Africa/Lagos',
         });
 
         scheduleIndividualReminder(reminder);

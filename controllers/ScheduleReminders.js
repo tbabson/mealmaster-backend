@@ -115,11 +115,9 @@ const sendEmailReminder = async (reminderId) => {
       return false;
     }
 
-    const { meal, user, reminderTime } = reminder;
-    const formattedTime = new Date(reminderTime).toLocaleString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long',
-      day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    const { meal, user, reminderTime, timezone } = reminder;
+    const tz = timezone || process.env.USER_TIMEZONE || 'Africa/Lagos';
+    const formattedTime = moment(reminderTime).tz(tz).format('dddd, MMMM Do YYYY [at] h:mm A (z)');
 
     const ingredientNames = meal.ingredients.map(({ name }) => name).join(', ');
     const textSteps = formatPreparationSteps(meal, 'text');

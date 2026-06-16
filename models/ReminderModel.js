@@ -41,6 +41,10 @@ const ReminderSchema = new mongoose.Schema(
       maxlength: [500, 'Note cannot be more than 500 characters'],
       default: '',
     },
+    timezone: {
+      type: String,
+      default: 'Africa/Lagos',
+    },
     notified: {
       type: Boolean,
       default: false,
