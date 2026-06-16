@@ -125,7 +125,13 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1/payment', paymentRoutes);
 
-// No catch-all — frontend is deployed separately
+app.get('/', (req, res) => {
+  res.json({ msg: 'MealMaster API is running' });
+});
+
+app.get('*', (req, res) => {
+  res.status(404).json({ msg: 'Route not found' });
+});
 
 
 
