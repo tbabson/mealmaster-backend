@@ -62,7 +62,7 @@ if (process.env.NODE_ENV === 'development') {
 
 initializeReminderSystem(); // Start the reminder scheduler
 
-app.use(express.static(path.resolve(__dirname, 'client/dist')));
+// Frontend served separately on Render Static Site
 
 // Updated CORS configuration
 app.use(cors({
@@ -125,9 +125,7 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1/payment', paymentRoutes);
 
-app.get('*', (req, res) => {
-  res.sendFile(path.resolve(__dirname, './client/dist', 'index.html'));
-});
+// No catch-all — frontend is deployed separately
 
 
 
