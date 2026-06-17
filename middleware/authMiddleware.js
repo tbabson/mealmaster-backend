@@ -15,8 +15,8 @@ export const authenticateUser = (req, res, next) => {
     req.user = { userId, fullName, role };
     next();
   } catch (error) {
-    // Clear the token cookie if authentication fails
-    res.clearCookie("token");
+    const isProduction = process.env.NODE_ENV === 'production'
+    res.clearCookie("token", { secure: isProduction, sameSite: isProduction ? 'none' : 'lax' });
     throw new UnauthenticatedError('authentication invalid');
   }
 };

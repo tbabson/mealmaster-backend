@@ -30,19 +30,24 @@ export const login = async (req, res) => {
   const token = createJWT({ userId: user._id, role: user.role, fullName: user.fullName })
 
   const oneDay = 1000 * 60 * 60 * 24
+  const isProduction = process.env.NODE_ENV === 'production'
 
   res.cookie('token', token, {
     httpOnly: true,
     expires: new Date(Date.now() + oneDay),
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
   })
   res.status(StatusCodes.OK).json({ msg: 'user logged in' })
 }
 
 export const logout = (req, res) => {
+  const isProduction = process.env.NODE_ENV === 'production'
   res.cookie('token', 'logout', {
     httpOnly: true,
     expires: new Date(Date.now()),
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
   })
   res.status(StatusCodes.OK).json({ msg: 'user logged out!' })
 }
