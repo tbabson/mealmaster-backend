@@ -221,13 +221,6 @@
         carry <code>numOfPages</code> and a total count whose key varies by resource
         (<code>totalMeals</code>, <code>totalOrders</code>, <code>totalUsers</code>, &hellip;).</li>
   </ul>
-
-  <div class="note warn">
-    <b>PATCH from a browser.</b> The CORS layer advertises
-    <code>GET, POST, PUT, DELETE, OPTIONS</code> — <code>PATCH</code> is not on the list, so a
-    cross-origin <code>PATCH</code> fails its preflight even though the route exists. Same-origin
-    calls, curl and server-to-server clients are unaffected.
-  </div>
 </section>
 
 <section id="errors">
