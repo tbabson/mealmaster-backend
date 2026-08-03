@@ -82,14 +82,14 @@ export const handleGoogleAuth = async (req, res) => {
       ? process.env.CLIENT_URL
       : 'http://localhost:5173';
 
-    res.redirect(`${clientUrl}/create-reminder?calendar_auth=success`);
+    res.redirect(`${clientUrl}/create-reminders?calendar_auth=success`);
   } catch (error) {
     console.error('Google Calendar auth error:', error);
     const clientUrl = process.env.NODE_ENV === 'production'
       ? process.env.CLIENT_URL
       : 'http://localhost:5173';
 
-    res.redirect(`${clientUrl}/create-reminder?calendar_auth=failed&error=${encodeURIComponent(error.message)}`);
+    res.redirect(`${clientUrl}/create-reminders?calendar_auth=failed&error=${encodeURIComponent(error.message)}`);
   }
 };
 

@@ -15,9 +15,7 @@ export const generateSitemap = async (baseURL) => {
         const staticRoutes = [
             { url: '/', changefreq: 'daily', priority: 1 },
             { url: '/meals', changefreq: 'daily', priority: 0.9 },
-            { url: '/blog', changefreq: 'daily', priority: 0.9 },
-            { url: '/about', changefreq: 'monthly', priority: 0.5 },
-            { url: '/contact', changefreq: 'monthly', priority: 0.5 }
+            { url: '/blog', changefreq: 'daily', priority: 0.9 }
         ];
 
         // Create sitemap stream
@@ -28,7 +26,9 @@ export const generateSitemap = async (baseURL) => {
             Readable.from([
                 ...staticRoutes,
                 ...blogs.map(blog => ({
-                    url: `/blog/${blog.slug}`,
+                    // Posts predating slug generation have none; GET /blogs/:id
+                    // accepts either form, so fall back to the id.
+                    url: `/blogs/${blog.slug || blog._id}`,
                     changefreq: 'weekly',
                     priority: 0.8,
                     lastmod: blog.updatedAt

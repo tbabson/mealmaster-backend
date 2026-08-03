@@ -353,7 +353,7 @@ const sendPushNotification = async (reminder) => {
       image: reminder.meal.image,
       data: {
         mealId: reminder.meal._id,
-        url: `/meal/${reminder.meal._id}`,
+        url: `/meals/${reminder.meal._id}`,
         imageSize: {
           width: 150,
           height: 150

@@ -180,7 +180,7 @@ export const sendPushNotification = async (req, res) => {
             body: `Hello ${reminder.user.fullName}, it's time to prepare your meal: ${reminder.meal.name}. Ingredients: ${reminder.meal.ingredients.map(ingredient => ingredient.name).join(', ')}.`,
             icon: reminder.meal.image || '/icons/icon-192.png',
             badge: '/icons/badge-72.png',
-            data: { url: `/meal/${reminder.meal._id}` },
+            data: { url: `/meals/${reminder.meal._id}` },
         });
 
         // Send the push notification
