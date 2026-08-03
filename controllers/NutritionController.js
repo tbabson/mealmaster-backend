@@ -8,6 +8,9 @@ import {
 } from '../utils/nutritionProfile.js';
 import NutritionRecommendation from '../models/NutritionRecommendationModel.js';
 
+// How many recommendations we generate and cache. Callers slice down via ?limit.
+const MAX_RECOMMENDATIONS = 10;
+
 const DISCLAIMER =
   'Nutrition values are estimated from ingredient lists and are for general guidance only. They are not a laboratory analysis and not medical advice.';
 
@@ -142,7 +145,11 @@ export const getNutritionRecommendations = async (req, res) => {
 
     // Only call OpenAI when the inputs have actually changed. A page reload with
     // the same order history and the same candidates serves the stored answer.
-    const fingerprint = recommendationFingerprint({ profile, candidates, limit });
+    //
+    // One fixed-size set is generated and cached regardless of the requested
+    // `limit`, then sliced on read — otherwise two pages asking for different
+    // counts would invalidate each other and call the model on every view.
+    const fingerprint = recommendationFingerprint({ profile, candidates });
     const cached = await NutritionRecommendation.findOne({ user: req.user.userId }).lean();
 
     let summary;
@@ -154,7 +161,11 @@ export const getNutritionRecommendations = async (req, res) => {
       ({ summary, items, generatedAt } = cached);
       servedFromCache = true;
     } else {
-      const result = await recommendMealsForProfile({ profile, candidates, limit });
+      const result = await recommendMealsForProfile({
+        profile,
+        candidates,
+        limit: MAX_RECOMMENDATIONS,
+      });
       summary = result.summary;
       items = (result.recommendations || []).map((r) => ({
         mealId: r.mealId,

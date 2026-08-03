@@ -173,10 +173,13 @@ export const filterAddressesToGaps = (addresses, gaps) => {
  *
  * Deliberately order-independent (sorted) so an incidental reordering of meals
  * or gaps does not invalidate a perfectly good cached answer.
+ *
+ * Deliberately excludes the requested `limit`: we always generate one fixed-size
+ * set and slice it on read. Including it would mean two pages asking for
+ * different counts thrash the cache and call the model on every view.
  */
-export const recommendationFingerprint = ({ profile, candidates, limit }) => {
+export const recommendationFingerprint = ({ profile, candidates }) => {
   const input = {
-    limit,
     orders: profile.ordersAnalysed,
     counted: profile.mealsWithNutrition,
     avg: profile.averagePerMeal,
