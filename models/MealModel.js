@@ -2,6 +2,27 @@ import mongoose from 'mongoose';
 import { MEAL, DIETARY } from "../utils/constants.js"
 import _default from "http-status-codes";
 
+// Estimated nutrition for one serving, derived from the meal's ingredient list.
+// An approximation for guidance — not a lab analysis, and not medical advice.
+const NutritionSchema = new mongoose.Schema(
+  {
+    servings: { type: Number, default: 1 },
+    calories: { type: Number }, // kcal
+    protein: { type: Number }, // g
+    carbohydrates: { type: Number }, // g
+    fat: { type: Number }, // g
+    fiber: { type: Number }, // g
+    sugar: { type: Number }, // g
+    sodium: { type: Number }, // mg
+    highlights: { type: [String], default: [] }, // e.g. "high protein"
+    caveats: { type: String, default: '' }, // what the estimate could not account for
+    source: { type: String, default: 'openai' },
+    model: { type: String },
+    generatedAt: { type: Date },
+  },
+  { _id: false }
+);
+
 const MealSchema = new mongoose.Schema(
   {
     name: {
@@ -51,6 +72,10 @@ const MealSchema = new mongoose.Schema(
     },
     cloudinaryId: {
       type: String, // To store Cloudinary public ID for deletion, if needed
+    },
+    nutrition: {
+      type: NutritionSchema,
+      default: null,
     },
     averageRating: {
       type: Number,

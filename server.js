@@ -30,6 +30,7 @@ import reviewRoutes from './routes/ReviewRoutes.js';
 import userRoutes from './routes/UserRoutes.js';
 import cartRoutes from './routes/CartRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
+import nutritionRoutes from './routes/nutritionRoutes.js';
 
 //public
 import { dirname } from 'path';
@@ -122,6 +123,7 @@ app.use('/api/v1/reviews', reviewRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1/payment', paymentRoutes);
+app.use('/api/v1/nutrition', nutritionRoutes);
 
 // API reference page
 app.get('/', (req, res) => {
