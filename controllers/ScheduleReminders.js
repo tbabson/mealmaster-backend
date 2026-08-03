@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 import schedule from 'node-schedule';
 import Reminder from '../models/ReminderModel.js';
-import { transporter } from '../utils/transporter.js';
+import { sendEmail } from '../utils/transporter.js';
 import moment from 'moment-timezone';
 import { google } from 'googleapis';
 import path from 'path';
@@ -159,9 +159,9 @@ const sendEmailReminder = async (reminderId) => {
       : `<tr><td style="font-size:14px;color:#94a3b8;padding:8px 0;">No preparation steps provided.</td></tr>`;
 
     const mailOptions = {
-      from: `"MealMaster" <${process.env.EMAIL_USER}>`,
-      to: user.email,
-      replyTo: process.env.EMAIL_USER,
+      from: { email: process.env.BREVO_SENDER_EMAIL, name: 'MealMaster' },
+      to: [{ email: user.email, name: user.fullName }],
+      replyTo: process.env.BREVO_REPLY_TO || process.env.BREVO_SENDER_EMAIL,
       subject: `Reminder: Time to prepare ${meal.name}!`,
 
       // ── Plain-text fallback ──────────────────────────────────────────────
@@ -321,12 +321,12 @@ Please do not reply to this email.`,
 </html>`
     };
 
-    await transporter.sendMail(mailOptions);
+    await sendEmail(mailOptions);
     return true;
   } catch (error) {
     console.error('Error sending email reminder:', error);
     if (error.response) {
-      console.error('SMTP response failed:', error.response);
+      console.error('Brevo response failed:', error.response);
     }
     return false;
   }

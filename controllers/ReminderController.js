@@ -2,7 +2,6 @@ import Reminder from '../models/ReminderModel.js';
 import Subscription from '../models/SubscriptionModel.js';
 import { StatusCodes } from 'http-status-codes';
 import Meal from '../models/MealModel.js'; // Assuming a Meal model exists
-//import nodemailer from 'nodemailer';
 import { scheduleIndividualReminder } from './ScheduleReminders.js';
 import { google } from 'googleapis';
 import moment from 'moment-timezone';

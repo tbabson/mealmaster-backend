@@ -653,7 +653,6 @@ cron.schedule('* * * * *', async () => {
   import cron from 'node-cron';
   import Reminder from '../models/ReminderModel.js';
   import { StatusCodes } from 'http-status-codes';
-  import nodemailer from 'nodemailer';
   import { google } from 'googleapis';
 
   // Configure Google Calendar API
