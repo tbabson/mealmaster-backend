@@ -1,0 +1,1353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MealMaster API</title>
+<meta name="description" content="MealMaster — plan meals, shop ingredients, never miss a prep time. Backend API reference.">
+<style>
+  :root{
+    --bg:#ffffff; --bg-alt:#f6f8f6; --bg-code:#f1f5f1; --fg:#16181d; --fg-mut:#5c6370;
+    --line:#e2e8e2; --accent:#28842b; --get:#0d8050; --post:#28842b;
+    --patch:#b45309; --del:#cf222e; --pill:#eaf0ea; --warn:#9a6700; --brand:#143315;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f1210; --bg-alt:#151a16; --bg-code:#111611; --fg:#e6e9e6; --fg-mut:#9aa3a0;
+      --line:#242c25; --accent:#5fbf62; --get:#3fb950; --post:#5fbf62;
+      --patch:#e0a458; --del:#f85149; --pill:#1b241c; --warn:#d29922; --brand:#e6e9e6;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  code,pre{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  header{border-bottom:1px solid var(--line);background:var(--bg-alt);padding:28px 24px}
+  .wrap{max-width:1180px;margin:0 auto}
+  header h1{margin:0 0 6px;font-size:26px;letter-spacing:-.02em;color:var(--brand)}
+  header p{margin:0;color:var(--fg-mut)}
+  .baseurl{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .baseurl span{color:var(--fg-mut);font-size:13px}
+  .baseurl code{background:var(--bg-code);border:1px solid var(--line);border-radius:6px;
+                padding:6px 10px;font-size:13px;word-break:break-all}
+
+  .layout{max-width:1180px;margin:0 auto;display:flex;gap:32px;padding:24px}
+  nav{width:230px;flex:none;position:sticky;top:24px;align-self:flex-start;max-height:calc(100vh - 48px);overflow:auto}
+  nav h4{margin:16px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--fg-mut)}
+  nav h4:first-child{margin-top:0}
+  nav a{display:block;padding:3px 0;font-size:13.5px;color:var(--fg)}
+  main{flex:1;min-width:0}
+
+  section{margin-bottom:40px;scroll-margin-top:16px}
+  section>h2{margin:0 0 4px;font-size:20px;border-bottom:1px solid var(--line);padding-bottom:8px}
+  section>p.lead{color:var(--fg-mut);margin:8px 0 16px}
+
+  details.ep{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;background:var(--bg-alt);overflow:hidden;scroll-margin-top:16px}
+  details.ep>summary{cursor:pointer;padding:11px 14px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;list-style:none}
+  details.ep>summary::-webkit-details-marker{display:none}
+  details.ep>summary:hover{background:var(--pill)}
+  details.ep[open]>summary{border-bottom:1px solid var(--line)}
+  .m{font-size:11px;font-weight:700;letter-spacing:.04em;padding:3px 7px;border-radius:4px;color:#fff;flex:none}
+  .m.get{background:var(--get)} .m.post{background:var(--post)}
+  .m.patch{background:var(--patch)} .m.delete{background:var(--del)}
+  .url{font-size:13px;word-break:break-all}
+  .url .b{color:var(--fg-mut)}
+  .url .p{font-weight:600}
+  .role{font-size:11px;padding:2px 7px;border-radius:99px;background:var(--pill);color:var(--fg-mut);flex:none}
+  .role.session{color:var(--accent)}
+  .role.admin{color:var(--del)}
+  .sum{color:var(--fg-mut);font-size:13px;width:100%}
+  @media(min-width:900px){.sum{width:auto;margin-left:auto;text-align:right}}
+  .ep .body{padding:14px}
+  .ep .body p{margin:0 0 12px}
+  .ep .body p:last-child{margin-bottom:0}
+  .ep h5{margin:14px 0 6px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg-mut)}
+  .ep h5:first-child{margin-top:0}
+  pre{background:var(--bg-code);border:1px solid var(--line);border-radius:6px;padding:11px 13px;
+      overflow-x:auto;font-size:12.5px;margin:0 0 12px}
+  pre:last-child{margin-bottom:0}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--fg-mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+  td code{background:var(--bg-code);padding:1px 5px;border-radius:4px;font-size:12.5px}
+  .errs{font-size:13px;color:var(--fg-mut)}
+  ul.plain{margin:0 0 12px;padding-left:20px}
+  ul.plain li{margin:3px 0}
+  .note{border-left:3px solid var(--accent);background:var(--bg-alt);padding:10px 14px;border-radius:0 6px 6px 0;margin:0 0 16px}
+  .note.warn{border-left-color:var(--warn)}
+  footer{border-top:1px solid var(--line);padding:24px;color:var(--fg-mut);font-size:13px}
+  .tablewrap{overflow-x:auto}
+  @media(max-width:860px){.layout{flex-direction:column;padding:16px}nav{width:auto;position:static;max-height:none}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <h1>MealMaster API</h1>
+    <p>Plan meals, shop the ingredients, never miss a prep time — Node.js · Express · MongoDB · Mongoose · Cloudinary · Stripe</p>
+    <div class="baseurl">
+      <span>Base URL</span>
+      <code>https://mealmaster1.onrender.com/api/v1</code>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+<nav>
+  <h4>Getting started</h4>
+  <a href="#conventions">Conventions</a>
+  <a href="#errors">Errors &amp; limits</a>
+  <a href="#meta">Service</a>
+  <h4>Auth</h4>
+  <a href="#auth-register">Register</a>
+  <a href="#auth-login">Log in</a>
+  <a href="#auth-logout">Log out</a>
+  <a href="#auth-google">Connect Calendar</a>
+  <a href="#auth-callback">OAuth callback</a>
+  <a href="#auth-revoke">Revoke Calendar</a>
+  <h4>Users</h4>
+  <a href="#u-current">Current user</a>
+  <a href="#u-list">List</a>
+  <a href="#u-get">Detail</a>
+  <a href="#u-patch">Update profile</a>
+  <a href="#u-password">Change password</a>
+  <a href="#u-delete">Delete</a>
+  <h4>Meals</h4>
+  <a href="#m-list">List</a>
+  <a href="#m-get">Detail</a>
+  <a href="#m-create">Create</a>
+  <a href="#m-patch">Update</a>
+  <a href="#m-delete">Delete</a>
+  <h4>Ingredients</h4>
+  <a href="#i-list">List</a>
+  <a href="#i-get">Detail</a>
+  <a href="#i-create">Create</a>
+  <a href="#i-patch">Update</a>
+  <a href="#i-delete">Delete</a>
+  <a href="#i-bymeal">Delete by meal</a>
+  <h4>Preparation steps</h4>
+  <a href="#p-list">List</a>
+  <a href="#p-get">Detail</a>
+  <a href="#p-create">Create</a>
+  <a href="#p-patch">Update</a>
+  <a href="#p-delete">Delete</a>
+  <a href="#p-bymeal">Delete by meal</a>
+  <h4>Cart</h4>
+  <a href="#c-get">Get cart</a>
+  <a href="#c-sync">Sync</a>
+  <a href="#c-add">Add meal</a>
+  <a href="#c-qty">Update quantity</a>
+  <a href="#c-rm-meal">Remove meal</a>
+  <a href="#c-rm-ing">Remove ingredient</a>
+  <a href="#c-clear">Clear</a>
+  <a href="#c-admin-all">Admin: list carts</a>
+  <a href="#c-admin-status">Admin: set status</a>
+  <a href="#c-admin-del">Admin: delete</a>
+  <h4>Orders</h4>
+  <a href="#o-place">Place</a>
+  <a href="#o-mine">By user</a>
+  <a href="#o-get">Detail</a>
+  <a href="#o-all">Admin: list</a>
+  <a href="#o-stats">Admin: dashboard</a>
+  <a href="#o-status">Order status</a>
+  <a href="#o-delivery">Delivery status</a>
+  <a href="#o-payment">Payment status</a>
+  <a href="#o-delete">Delete</a>
+  <h4>Reminders</h4>
+  <a href="#r-create">Create</a>
+  <a href="#r-mine">Mine</a>
+  <a href="#r-all">All</a>
+  <a href="#r-patch">Update</a>
+  <a href="#r-delete">Delete</a>
+  <a href="#r-subscribe">Save push device</a>
+  <a href="#r-push">Send push</a>
+  <a href="#r-calendar">Calendar sync</a>
+  <h4>Reviews</h4>
+  <a href="#rv-create">Create</a>
+  <a href="#rv-list">List</a>
+  <a href="#rv-get">Detail</a>
+  <a href="#rv-patch">Update</a>
+  <a href="#rv-delete">Delete</a>
+  <h4>Shopping lists</h4>
+  <a href="#s-create">Create</a>
+  <a href="#s-list">List</a>
+  <a href="#s-rm">Remove ingredient</a>
+  <a href="#s-checkout">Check out</a>
+  <a href="#s-delete">Delete</a>
+  <h4>Blog</h4>
+  <a href="#b-list">List</a>
+  <a href="#b-get">Detail</a>
+  <a href="#b-create">Create</a>
+  <a href="#b-patch">Update</a>
+  <a href="#b-delete">Delete</a>
+  <a href="#b-comment">Add comment</a>
+  <a href="#b-uncomment">Delete comment</a>
+  <h4>Payments</h4>
+  <a href="#pay-stripe">Stripe session</a>
+  <a href="#pay-bank">Bank transfer</a>
+  <a href="#pay-webhook">Webhook</a>
+</nav>
+
+<main>
+
+<section id="conventions">
+  <h2>Conventions</h2>
+  <ul class="plain">
+    <li><b>Auth:</b> email and password. A successful login sets an <code>HttpOnly</code> cookie named
+        <code>token</code> holding a JWT — there are no API keys and no bearer headers. Browser clients
+        must send <code>credentials: 'include'</code>. In production the cookie is
+        <code>Secure; SameSite=None</code>; in development it is <code>SameSite=Lax</code>.</li>
+    <li><b>Roles:</b> <code>user</code> and <code>admin</code>. <b>The very first account ever
+        registered becomes <code>admin</code></b>; every account after it is a <code>user</code>.
+        Endpoints below are labelled <span class="role">public</span>,
+        <span class="role session">session</span> or <span class="role admin">admin</span>.</li>
+    <li><b>Content type:</b> <code>application/json</code>, except the four image routes
+        (meal create/update, blog create/update, user profile update) which take
+        <code>multipart/form-data</code>, and the Stripe webhook which takes a raw body.</li>
+    <li><b>Ids</b> are MongoDB ObjectIds — 24 hex characters.</li>
+    <li><b>Images</b> are uploaded to Cloudinary and stored on the document as a
+        <code>secure_url</code> plus a <code>cloudinaryId</code> used for later deletion. Accepted
+        types are JPEG, JPG, PNG and WEBP.</li>
+    <li><b>Times</b> are ISO 8601 UTC. Reminder times are converted to UTC on write and rendered back
+        in the reminder's own IANA <code>timezone</code>, which defaults to
+        <code>Africa/Lagos</code>.</li>
+    <li><b>Money</b> is Nigerian naira. Orders add 10% tax and a flat &#8358;300 shipping charge;
+        Stripe line items are converted to kobo.</li>
+    <li><b>Pagination</b> is <code>?page=</code> and, where supported, <code>?limit=</code>. Responses
+        carry <code>numOfPages</code> and a total count whose key varies by resource
+        (<code>totalMeals</code>, <code>totalOrders</code>, <code>totalUsers</code>, &hellip;).</li>
+  </ul>
+
+  <div class="note warn">
+    <b>PATCH from a browser.</b> The CORS layer advertises
+    <code>GET, POST, PUT, DELETE, OPTIONS</code> — <code>PATCH</code> is not on the list, so a
+    cross-origin <code>PATCH</code> fails its preflight even though the route exists. Same-origin
+    calls, curl and server-to-server clients are unaffected.
+  </div>
+</section>
+
+<section id="errors">
+  <h2>Errors &amp; limits</h2>
+  <p class="lead">Two envelopes are in use. Errors <i>thrown</i> by a route reach the shared handler and
+     come back as <code>msg</code>; errors <i>caught</i> inside a controller are returned directly as
+     <code>message</code>. Check for both.</p>
+<pre>{ "msg": "invalid credentials" }
+
+{ "message": "Meal not found" }</pre>
+  <div class="tablewrap">
+  <table>
+    <tr><th>Status</th><th>Thrown by</th><th>Meaning</th></tr>
+    <tr><td><code>400</code></td><td><code>BadRequestError</code></td><td>Rejected by a rule — bad id format, duplicate review, empty cart</td></tr>
+    <tr><td><code>401</code></td><td><code>UnauthenticatedError</code></td><td>Missing, expired or unparseable <code>token</code> cookie. The cookie is cleared on the way out</td></tr>
+    <tr><td><code>403</code></td><td><code>UnauthorizedError</code></td><td>Authenticated, but the wrong role — or someone else's row</td></tr>
+    <tr><td><code>404</code></td><td><code>NotFoundError</code></td><td>No such row. Unmatched paths also return <code>{ "msg": "Route not found" }</code></td></tr>
+    <tr><td><code>429</code></td><td>rate limiter</td><td>Register and login only — see below</td></tr>
+    <tr><td><code>500</code></td><td>&mdash;</td><td>Unhandled. The message is passed through, so treat it as diagnostic rather than stable</td></tr>
+  </table>
+  </div>
+
+  <h5 style="color:var(--fg-mut);font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin:18px 0 6px">Rate limits</h5>
+  <div class="tablewrap">
+  <table>
+    <tr><th>Scope</th><th>Limit</th><th>Window</th></tr>
+    <tr><td><code>POST /auth/register</code></td><td>15</td><td>15 min</td></tr>
+    <tr><td><code>POST /auth/login</code></td><td>15</td><td>15 min</td></tr>
+  </table>
+  </div>
+  <p class="errs">Keyed by client IP, shared across both routes, and returning
+     <code>{ "msg": "IP rate limit exceeded, retry in 15 minutes" }</code>. No other endpoint is
+     rate limited. Uploads are capped by multer: 5&nbsp;MB for blog images, ~1.1&nbsp;MB for meal and
+     profile images.</p>
+</section>
+
+<section id="meta">
+  <h2>Service</h2>
+  <p class="lead">Served at the root, outside <code>/api/v1</code>.</p>
+
+  <details class="ep">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">https://mealmaster1.onrender.com</span><span class="p">/health</span></span>
+      <span class="role">public</span><span class="sum">Liveness and database check</span></summary>
+    <div class="body">
+      <p>Reports the Mongoose connection state. Returns <code>503</code> with
+         <code>"status": "degraded"</code> when the database is anything other than connected, so it is
+         safe to wire straight into an uptime monitor or a free-tier keep-alive ping.</p>
+      <h5>200</h5>
+<pre>{ "status": "ok", "uptime": 122,
+  "timestamp": "2026-08-03T10:36:00.824Z", "database": "connected" }</pre></div>
+  </details>
+
+  <details class="ep">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">https://mealmaster1.onrender.com</span><span class="p">/</span></span>
+      <span class="role">public</span><span class="sum">This page</span></summary>
+    <div class="body">
+      <p>The document you are reading. Not a health check — it answers whether the database is up
+         or down.</p></div>
+  </details>
+
+  <details class="ep">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">https://mealmaster1.onrender.com</span><span class="p">/sitemap.xml</span></span>
+      <span class="role">public</span><span class="sum">Generated sitemap</span></summary>
+    <div class="body">
+      <p>Built on each request from the current meals and published blog posts, against the requesting
+         host. Content type <code>application/xml</code>.</p></div>
+  </details>
+</section>
+
+<section id="auth">
+  <h2>Auth</h2>
+  <p class="lead">Register, log in, receive a cookie. Google OAuth is a separate, optional grant used
+     only for Calendar sync — it is not a sign-in method.</p>
+
+  <details class="ep" id="auth-register">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/auth</span><span class="p">/register</span></span>
+      <span class="role">public</span><span class="sum">Create an account</span></summary>
+    <div class="body">
+      <p>Body: <code>fullName</code>*, <code>email</code>* (unique), <code>password</code>*
+         (minimum 8 characters). The <code>role</code> field in the body is ignored and overwritten —
+         the first account created becomes <code>admin</code>, all others <code>user</code>.</p>
+      <h5>Request</h5>
+<pre>{ "fullName": "Jane Doe", "email": "you@example.com", "password": "correct-horse" }</pre>
+      <h5>201</h5>
+<pre>{ "msg": "user created" }</pre>
+      <p class="errs"><b>Errors:</b> <code>401</code> when the password is shorter than 8 characters;
+         <code>500</code> on a duplicate email.</p></div>
+  </details>
+
+  <details class="ep" id="auth-login">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/auth</span><span class="p">/login</span></span>
+      <span class="role">public</span><span class="sum">Start a session</span></summary>
+    <div class="body">
+      <p>Body: <code>email</code>*, <code>password</code>*. Sets the <code>token</code> cookie for
+         24 hours. The JWT carries <code>userId</code>, <code>role</code> and <code>fullName</code>.</p>
+      <h5>200</h5>
+<pre>{ "msg": "user logged in" }</pre>
+      <p class="errs"><b>Errors:</b> <code>401 invalid credentials</code> — returned identically for an
+         unknown address and a wrong password.</p></div>
+  </details>
+
+  <details class="ep" id="auth-logout">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/auth</span><span class="p">/logout</span></span>
+      <span class="role">public</span><span class="sum">Clear the cookie</span></summary>
+    <div class="body">
+      <p>Overwrites the cookie with an already-expired value. Safe to call without a session.</p>
+      <h5>200</h5>
+<pre>{ "msg": "user logged out!" }</pre></div>
+  </details>
+
+  <details class="ep" id="auth-google">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/auth</span><span class="p">/google</span></span>
+      <span class="role session">session</span><span class="sum">Begin Calendar consent</span></summary>
+    <div class="body">
+      <p>Redirects to Google's consent screen for the <code>calendar</code> and
+         <code>calendar.events</code> scopes, with <code>access_type=offline</code> and
+         <code>prompt=consent</code> so that a refresh token is always issued. Navigate to it — do not
+         fetch it.</p></div>
+  </details>
+
+  <details class="ep" id="auth-callback">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/auth</span><span class="p">/google/callback?code=</span></span>
+      <span class="role session">session</span><span class="sum">Store the refresh token</span></summary>
+    <div class="body">
+      <p>Exchanges the code, saves <code>googleRefreshToken</code> on the user and flips
+         <code>googleCalendarSyncEnabled</code> to true. Always redirects; never returns JSON.</p>
+      <div class="tablewrap">
+      <table>
+        <tr><th>Outcome</th><th>Redirect</th></tr>
+        <tr><td>Granted</td><td><code>CLIENT_URL/create-reminder?calendar_auth=success</code></td></tr>
+        <tr><td>Denied or no refresh token</td><td><code>CLIENT_URL/create-reminder?calendar_auth=failed&amp;error=&hellip;</code></td></tr>
+      </table>
+      </div>
+      <p class="errs">Google withholds the refresh token if the app is already authorised, which is why
+         consent is forced on every pass.</p></div>
+  </details>
+
+  <details class="ep" id="auth-revoke">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/auth</span><span class="p">/google/revoke</span></span>
+      <span class="role session">session</span><span class="sum">Disconnect Calendar</span></summary>
+    <div class="body">
+      <p>Clears the stored refresh token locally. Google's own grant is not revoked upstream — the user
+         must remove it from their Google account to fully undo consent.</p>
+      <h5>200</h5>
+<pre>{ "message": "Google Calendar access revoked" }</pre></div>
+  </details>
+</section>
+
+<section id="users">
+  <h2>Users</h2>
+
+  <details class="ep" id="u-current">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/users</span><span class="p">/current-user</span></span>
+      <span class="role session">session</span><span class="sum">Whoever holds the cookie</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "user": { "_id": "66f1…", "fullName": "Jane Doe", "email": "you@example.com",
+            "role": "user", "orders": [], "cartItems": [], "reminders": [],
+            "googleCalendarSyncEnabled": false, "createdAt": "…", "updatedAt": "…" } }</pre>
+      <p class="errs">The password hash is stripped by the model's own <code>toJSON</code>, so it can
+         never leak from any endpoint that returns a user.</p></div>
+  </details>
+
+  <details class="ep" id="u-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/users</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Search, filter, paginate</span></summary>
+    <div class="body">
+      <div class="tablewrap">
+      <table>
+        <tr><th>Query</th><th>Type</th><th>Default</th></tr>
+        <tr><td><code>search</code></td><td>matches name or email, case-insensitive</td><td>&mdash;</td></tr>
+        <tr><td><code>role</code></td><td><code>user</code> | <code>admin</code> | <code>all</code></td><td><code>all</code></td></tr>
+        <tr><td><code>sort</code></td><td><code>newest</code> | <code>oldest</code> | <code>a-z</code> | <code>z-a</code></td><td><code>newest</code></td></tr>
+        <tr><td><code>page</code>, <code>limit</code></td><td>integers</td><td><code>1</code>, <code>12</code></td></tr>
+      </table>
+      </div>
+      <h5>200</h5>
+<pre>{ "users": [ { …, "cartItems": [ … ] } ],
+  "totalUsers": 48, "numOfPages": 4, "currentPage": 1 }</pre>
+      <p class="errs">Each user is returned with orders and reminders populated, plus their cart fetched
+         separately — one extra query per user in the page.</p></div>
+  </details>
+
+  <details class="ep" id="u-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/users</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">One user and everything attached</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "user": { … }, "orders": [ … ], "cartItems": [ … ], "reminders": [ … ] }</pre>
+      <p class="errs">Any signed-in user may read any id — this route does not check ownership.</p></div>
+  </details>
+
+  <details class="ep" id="u-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/users</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Update your own profile</span></summary>
+    <div class="body">
+      <p><code>multipart/form-data</code>. Any user field plus an optional <code>profileImage</code>
+         file; a new image replaces the old one in Cloudinary. <code>password</code> is stripped from
+         the body and cannot be changed here.</p>
+      <div class="note">
+        <b>The <code>:id</code> is decorative.</b> The update is applied to the caller's own
+        <code>userId</code> from the cookie, whatever id appears in the path. You cannot edit another
+        account through this route, and an admin cannot edit a user through it either.
+      </div>
+      <h5>200</h5>
+<pre>{ "user": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="u-password">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/users</span><span class="p">/changeUserPassword</span></span>
+      <span class="role session">session</span><span class="sum">Rotate the password</span></summary>
+    <div class="body">
+      <p>Body: <code>oldPassword</code>*, <code>newPassword</code>* (minimum 8 characters).</p>
+      <h5>200</h5>
+<pre>{ "msg": "Success! Password Changed." }</pre>
+      <p class="errs"><b>Errors:</b> <code>401</code> when the new password is too short, and
+         <code>401 Enter correct old password</code> when the old one does not match. Existing sessions
+         are not invalidated.</p></div>
+  </details>
+
+  <details class="ep" id="u-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/users</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Remove an account</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "msg": "user deleted", "user": { … } }</pre>
+      <p class="errs">Deletes the user document only. Their orders, carts, reminders and reviews are
+         left behind and will point at a missing user.</p></div>
+  </details>
+</section>
+
+<section id="meals">
+  <h2>Meals</h2>
+  <p class="lead">The centre of the data model. A meal owns its ingredients and preparation steps by
+     reference, and carries a rolling average rating maintained by the review model.</p>
+
+  <details class="ep" id="m-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/meals</span><span class="p">/</span></span>
+      <span class="role">public</span><span class="sum">Browse the catalogue</span></summary>
+    <div class="body">
+      <div class="tablewrap">
+      <table>
+        <tr><th>Query</th><th>Type</th><th>Default</th></tr>
+        <tr><td><code>name</code></td><td>substring, case-insensitive</td><td>&mdash;</td></tr>
+        <tr><td><code>country</code></td><td>substring, case-insensitive</td><td>&mdash;</td></tr>
+        <tr><td><code>mealType</code></td><td><code>Breakfast</code> | <code>Lunch</code> | <code>Dinner</code> | <code>Desert</code> | <code>Junk</code> | <code>Snack</code> | <code>all</code></td><td><code>all</code></td></tr>
+        <tr><td><code>dietary</code></td><td><code>none</code> | <code>vegan</code> | <code>vegetarian</code> | <code>gluten-free</code> | <code>halal</code> | <code>kosher</code> | <code>all</code></td><td><code>all</code></td></tr>
+        <tr><td><code>sort</code></td><td><code>newest</code> | <code>oldest</code> | <code>a-z</code> | <code>z-a</code></td><td><code>newest</code></td></tr>
+        <tr><td><code>page</code>, <code>limit</code></td><td>integers</td><td><code>1</code>, <code>10</code></td></tr>
+      </table>
+      </div>
+      <h5>200</h5>
+<pre>{ "totalMeals": 37, "numOfPages": 4, "currentPage": 1, "count": 10,
+  "meals": [ { "_id": "…", "name": "Jollof Rice", "mealType": "Lunch",
+               "country": "Nigeria", "dietary": ["none"],
+               "image": "https://res.cloudinary.com/…",
+               "ingredients": [ { "name": "Rice", "quantity": 500, "unit": "g", "price": 1200 } ],
+               "averageRating": 5, "numOfReviews": 3 } ] }</pre>
+      <p class="errs"><code>name</code> and <code>country</code> both write to the same
+         <code>$or</code> key, so passing both applies only <code>country</code>. Ingredients are
+         populated here; preparation steps are not.</p></div>
+  </details>
+
+  <details class="ep" id="m-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/meals</span><span class="p">/:id</span></span>
+      <span class="role">public</span><span class="sum">One meal, fully expanded</span></summary>
+    <div class="body">
+      <p>Populates ingredients, preparation steps, and reviews with each reviewer's
+         <code>fullName</code>.</p>
+      <h5>200</h5>
+<pre>{ "meal": { …, "preparationSteps": [ … ], "reviews": [ … ] } }</pre>
+      <p class="errs"><b>Errors:</b> <code>404 Meal not found</code>; <code>500</code> for a malformed
+         id.</p></div>
+  </details>
+
+  <details class="ep" id="m-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/meals</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Create with an image</span></summary>
+    <div class="body">
+      <p><code>multipart/form-data</code>. Fields: <code>name</code>*, <code>mealType</code>*,
+         <code>country</code>*, <code>dietary</code>, <code>isRecommended</code>,
+         <code>ingredients</code>, <code>preparationSteps</code>, and an <code>image</code> file*.
+         The image is required — the request is rejected without one.</p>
+      <h5>201</h5>
+<pre>{ "meal": { … } }</pre>
+      <p class="errs">Ingredients and steps are normally created <i>after</i> the meal, through their
+         own endpoints, since both require a meal id to attach to.</p></div>
+  </details>
+
+  <details class="ep" id="m-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/meals</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Update, optionally re-imaging</span></summary>
+    <div class="body">
+      <p><code>multipart/form-data</code>. Sending a new <code>image</code> destroys the previous
+         Cloudinary asset first. Returns the document under a differently-named key than create does.</p>
+      <h5>200</h5>
+<pre>{ "updatedMeal": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="m-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/meals</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Delete meal and its reviews</span></summary>
+    <div class="body">
+      <p>Removes the Cloudinary image, then the document. A model hook deletes every review attached to
+         the meal. Ingredients and preparation steps are <i>not</i> cascaded — clear them first with the
+         two delete-by-meal routes below.</p>
+      <h5>200</h5>
+<pre>{ "message": "Meal deleted successfully" }</pre></div>
+  </details>
+</section>
+
+<section id="ingredients">
+  <h2>Ingredients</h2>
+  <p class="lead">Each ingredient belongs to exactly one meal and carries its own price — the number the
+     cart and the shopping list both total up.</p>
+
+  <details class="ep" id="i-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/ingredients</span><span class="p">/</span></span>
+      <span class="role">public</span><span class="sum">Every ingredient</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "ingredients": [ … ], "count": 214 }</pre>
+      <p class="errs">Unfiltered and unpaginated — it returns the whole collection.</p></div>
+  </details>
+
+  <details class="ep" id="i-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/ingredients</span><span class="p">/:id</span></span>
+      <span class="role">public</span><span class="sum">One ingredient</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "ingredient": { "_id": "…", "name": "Rice", "quantity": 500, "unit": "g",
+                  "price": 1200, "meal": "…", "substitutions": [] } }</pre></div>
+  </details>
+
+  <details class="ep" id="i-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/ingredients</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Attach one to a meal</span></summary>
+    <div class="body">
+      <p>Body: <code>meal</code>* (meal id), <code>name</code>*, <code>quantity</code>*,
+         <code>unit</code>*, <code>price</code>*, and optional <code>substitutions</code>. The new id is
+         pushed onto the meal's <code>ingredients</code> array in the same request.</p>
+      <h5>Request</h5>
+<pre>{ "meal": "66f1…", "name": "Rice", "quantity": 500, "unit": "g", "price": 1200,
+  "substitutions": [ { "name": "Basmati", "quantity": 500, "unit": "g" } ] }</pre>
+      <h5>201</h5>
+<pre>{ "ingredient": { … } }</pre>
+      <p class="errs"><b>Errors:</b> <code>404</code> when the meal id does not exist.</p></div>
+  </details>
+
+  <details class="ep" id="i-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/ingredients</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Edit, or move to another meal</span></summary>
+    <div class="body">
+      <p>All fields optional. Passing a different <code>meal</code> id moves the ingredient: it is
+         pulled from the old meal's array and added to the new one.</p>
+      <p class="errs">Falsy values are treated as absent, so <code>price: 0</code> and
+         <code>quantity: 0</code> leave the existing value in place.</p></div>
+  </details>
+
+  <details class="ep" id="i-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/ingredients</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Delete one</span></summary>
+    <div class="body">
+      <p>Also pulls the id out of every meal that referenced it.</p>
+      <h5>200</h5>
+<pre>{ "message": "Ingredient deleted successfully" }</pre>
+      <p class="errs"><b>Errors:</b> <code>400</code> for an id that is not 24 hex characters;
+         <code>404</code> when nothing matched.</p></div>
+  </details>
+
+  <details class="ep" id="i-bymeal">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/ingredients</span><span class="p">/meal/:mealId</span></span>
+      <span class="role session">session</span><span class="sum">Clear a meal's ingredients</span></summary>
+    <div class="body">
+      <p>Deletes every ingredient for the meal and empties the meal's array. Note this one needs only a
+         session, not the admin role that the per-id routes require.</p>
+      <h5>200</h5>
+<pre>{ "message": "Deleted 8 ingredients for meal 66f1…" }</pre></div>
+  </details>
+</section>
+
+<section id="prep">
+  <h2>Preparation steps</h2>
+  <p class="lead">A step document groups an ordered list of instructions for one meal at one skill
+     level. Every route here is admin-only except the delete-by-meal helper.</p>
+
+  <details class="ep" id="p-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/preparationSteps</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">All, optionally by skill</span></summary>
+    <div class="body">
+      <p>Query: <code>skillLevel</code> — <code>Beginner</code>, <code>Intermediate</code> or
+         <code>Advanced</code>.</p>
+      <h5>200</h5>
+<pre>{ "preparationSteps": [ … ], "count": 12 }</pre></div>
+  </details>
+
+  <details class="ep" id="p-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/preparationSteps</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">One document</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "preparationSteps": { … } }</pre>
+      <p class="errs">Read a meal's steps without admin rights through
+         <code>GET /meals/:id</code>, which populates them.</p></div>
+  </details>
+
+  <details class="ep" id="p-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/preparationSteps</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Create for a meal</span></summary>
+    <div class="body">
+      <p>Body: <code>meal</code>* (meal id), <code>steps</code>*, <code>description</code>,
+         <code>skillLevel</code> (defaults to <code>Beginner</code>). The ingredient list is copied from
+         the meal automatically — do not send one.</p>
+      <h5>Request</h5>
+<pre>{ "meal": "66f1…", "skillLevel": "Beginner", "description": "Weeknight version",
+  "steps": [ { "stepNumber": 1, "instruction": "Parboil the rice", "duration": "10 minutes" },
+             { "stepNumber": 2, "instruction": "Blend peppers and onions" } ] }</pre>
+      <h5>201</h5>
+<pre>{ "preparationStep": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="p-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/preparationSteps</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Replace fields</span></summary>
+    <div class="body">
+      <p>Sending <code>steps</code> replaces the whole array rather than merging it. Sending
+         <code>meal</code> also links the document into that meal's <code>preparationSteps</code> and
+         returns the populated meal alongside.</p>
+      <h5>200</h5>
+<pre>{ "preparationStep": { … }, "meal": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="p-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/preparationSteps</span><span class="p">/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Delete one</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Preparation step deleted successfully" }</pre></div>
+  </details>
+
+  <details class="ep" id="p-bymeal">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/preparationSteps</span><span class="p">/meal/:mealId</span></span>
+      <span class="role session">session</span><span class="sum">Clear a meal's steps</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Deleted 2 preparation steps for meal 66f1…" }</pre></div>
+  </details>
+</section>
+
+<section id="cart">
+  <h2>Cart</h2>
+  <p class="lead">One cart per user, enforced by a unique index. A cart holds meals, and each meal holds
+     the subset of its ingredients the shopper actually wants — so quantities are edited per ingredient,
+     not per meal.</p>
+
+  <div class="note">
+    Totals are not stored. The cart returns raw items; price, tax and shipping are computed at order
+    time as <code>&Sigma;(price &times; quantity)</code>, plus 10% tax, plus &#8358;300 shipping.
+  </div>
+
+  <details class="ep" id="c-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/:userId</span></span>
+      <span class="role session">session</span><span class="sum">Fetch, creating if absent</span></summary>
+    <div class="body">
+      <p>Returns the cart document directly, not wrapped. An empty cart is created on first read rather
+         than returning <code>404</code>.</p>
+      <h5>200</h5>
+<pre>{ "_id": "…", "userId": "…", "cartItems": [
+    { "mealID": "…", "name": "Jollof Rice", "image": "https://…",
+      "ingredients": [ { "name": "Rice", "quantity": 2, "price": 1200, "unit": "g" } ] } ] }</pre></div>
+  </details>
+
+  <details class="ep" id="c-sync">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/sync</span></span>
+      <span class="role session">session</span><span class="sum">Replace the whole cart</span></summary>
+    <div class="body">
+      <p>Body: <code>userId</code>*, <code>cartItems</code>*. Overwrites server state wholesale — the
+         route a client uses to push a locally-held cart up after signing in. Last write wins.</p></div>
+  </details>
+
+  <details class="ep" id="c-add">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/add</span></span>
+      <span class="role session">session</span><span class="sum">Add or merge one meal</span></summary>
+    <div class="body">
+      <p>Body: <code>userId</code>*, <code>meal</code>*. If the meal is already in the cart its
+         ingredients are merged and matching quantities are summed; otherwise the meal is appended.</p>
+      <h5>Request</h5>
+<pre>{ "userId": "…", "meal": { "mealID": "…", "name": "Jollof Rice", "image": "https://…",
+    "ingredients": [ { "name": "Rice", "quantity": 1, "price": 1200, "unit": "g" } ] } }</pre></div>
+  </details>
+
+  <details class="ep" id="c-qty">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/:userId/update/:mealID</span></span>
+      <span class="role session">session</span><span class="sum">Set an ingredient quantity</span></summary>
+    <div class="body">
+      <p>Body: <code>ingredientName</code>*, <code>newQuantity</code>*. A quantity of zero or less
+         removes the ingredient, and removing the last ingredient removes the meal from the cart
+         entirely.</p></div>
+  </details>
+
+  <details class="ep" id="c-rm-meal">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/:userId/remove/:mealID</span></span>
+      <span class="role session">session</span><span class="sum">Drop a meal</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ …updated cart… }</pre></div>
+  </details>
+
+  <details class="ep" id="c-rm-ing">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/:userId/remove/:mealID/:ingredientName</span></span>
+      <span class="role session">session</span><span class="sum">Drop one ingredient</span></summary>
+    <div class="body">
+      <p>The name is matched exactly and travels in the path, so it must be URL-encoded.</p></div>
+  </details>
+
+  <details class="ep" id="c-clear">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/:userId/clear</span></span>
+      <span class="role session">session</span><span class="sum">Empty it</span></summary>
+    <div class="body">
+      <p>Empties <code>cartItems</code> and keeps the document. Placing an order does this
+         automatically.</p></div>
+  </details>
+
+  <details class="ep" id="c-admin-all">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/admin/all</span></span>
+      <span class="role admin">admin</span><span class="sum">Every cart</span></summary>
+    <div class="body">
+      <p>Query: <code>search</code>, <code>searchStatus</code>,
+         <code>sort</code> (<code>latest</code> | <code>oldest</code> | <code>total-highest</code> |
+         <code>total-lowest</code>), <code>page</code>, <code>limit</code>.</p>
+      <h5>200</h5>
+<pre>{ "carts": [ … ], "totalCarts": 20, "numOfPages": 2, "currentPage": 1 }</pre>
+      <p class="errs">The two <code>total-*</code> sorts key on a field the cart schema no longer
+         stores, so they order arbitrarily.</p></div>
+  </details>
+
+  <details class="ep" id="c-admin-status">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/admin/:cartId/status</span></span>
+      <span class="role admin">admin</span><span class="sum">Set a status</span></summary>
+    <div class="body">
+      <p>Body: <code>status</code>. The cart schema does not declare this field, so the value is
+         accepted but not persisted.</p></div>
+  </details>
+
+  <details class="ep" id="c-admin-del">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/cart</span><span class="p">/admin/:cartId</span></span>
+      <span class="role admin">admin</span><span class="sum">Delete a cart</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Cart deleted successfully" }</pre></div>
+  </details>
+</section>
+
+<section id="orders">
+  <h2>Orders</h2>
+  <p class="lead">An order is a frozen copy of the cart plus an address and a payment method. Order
+     status and delivery status are separate fields that update each other.</p>
+
+  <div class="tablewrap">
+  <table>
+    <tr><th>Field</th><th>Values</th></tr>
+    <tr><td><code>status</code></td><td><code>Pending</code>, <code>Processing</code>, <code>Processed</code>, <code>Delivered</code>, <code>Cancelled</code></td></tr>
+    <tr><td><code>deliveryStatus</code></td><td><code>Scheduled</code>, <code>Clearing</code>, <code>Out for Delivery</code>, <code>Delivered</code>, <code>Failed</code></td></tr>
+    <tr><td><code>paymentMethod</code></td><td><code>stripe</code>, <code>bankTransfer</code></td></tr>
+  </table>
+  </div>
+
+  <details class="ep" id="o-place">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/place</span></span>
+      <span class="role session">session</span><span class="sum">Check out the cart</span></summary>
+    <div class="body">
+      <p>Body: <code>userId</code>*, <code>shippingAddress</code>*, <code>paymentMethod</code>*,
+         <code>transactionId</code>. Items and totals come from the stored cart, not the request — the
+         client cannot set its own price. The cart is emptied on success and a tracking number is
+         generated.</p>
+      <h5>Request</h5>
+<pre>{ "userId": "…", "paymentMethod": "bankTransfer",
+  "shippingAddress": { "fullName": "Jane Doe", "address": "12 Marina Rd", "city": "Lagos",
+                       "postalCode": "101241", "country": "Nigeria", "phone": "+234…" } }</pre>
+      <h5>201</h5>
+<pre>{ "_id": "…", "totalAmount": 15300, "taxPrice": 1200, "shippingPrice": 300,
+  "status": "Pending", "deliveryStatus": "Scheduled", "trackingNumber": "TRACK48210",
+  "isPaid": false, "cartItems": [ … ] }</pre>
+      <p class="errs"><b>Errors:</b> <code>400</code> when a required field is missing or the cart is
+         empty.</p></div>
+  </details>
+
+  <details class="ep" id="o-mine">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/user/:userId</span></span>
+      <span class="role session">session</span><span class="sum">A user's order history</span></summary>
+    <div class="body">
+      <p>Newest first.</p>
+      <h5>200</h5>
+<pre>{ "orders": [ … ] }</pre></div>
+  </details>
+
+  <details class="ep" id="o-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/:orderId</span></span>
+      <span class="role session">session</span><span class="sum">One order</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "order": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="o-all">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Every order</span></summary>
+    <div class="body">
+      <div class="tablewrap">
+      <table>
+        <tr><th>Query</th><th>Type</th><th>Default</th></tr>
+        <tr><td><code>search</code></td><td>recipient name or tracking number</td><td>&mdash;</td></tr>
+        <tr><td><code>status</code></td><td>order status, or <code>all</code></td><td><code>all</code></td></tr>
+        <tr><td><code>delivery</code></td><td>delivery status, or <code>all</code></td><td><code>all</code></td></tr>
+        <tr><td><code>sort</code></td><td><code>oldest</code> | <code>amount-highest</code> | <code>amount-lowest</code></td><td>newest</td></tr>
+        <tr><td><code>page</code></td><td>integer, 10 per page</td><td><code>1</code></td></tr>
+      </table>
+      </div>
+      <h5>200</h5>
+<pre>{ "orders": [ … ], "totalOrders": 92, "numOfPages": 10 }</pre></div>
+  </details>
+
+  <details class="ep" id="o-stats">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/stats</span></span>
+      <span class="role admin">admin</span><span class="sum">Dashboard aggregate</span></summary>
+    <div class="body">
+      <p>Everything the admin dashboard needs in one round trip. The six-month series is gap-filled, so
+         the chart always has six points even in a month with no orders.</p>
+      <h5>200</h5>
+<pre>{ "totals": { "orders": 92, "revenue": 1284000, "users": 48, "meals": 37,
+              "blogs": 6, "reviews": 21, "pendingOrders": 4 },
+  "ordersByStatus":   [ { "_id": "Pending", "count": 4 } ],
+  "ordersByDelivery": [ { "_id": "Scheduled", "count": 4 } ],
+  "recentOrders": [ … ],
+  "monthlyData": [ { "month": "Mar", "orders": 12, "revenue": 184000 } ],
+  "topMeals":    [ { "_id": "Jollof Rice", "orders": 31 } ] }</pre>
+      <p class="errs">Declared before <code>/:orderId</code> so the literal path is not swallowed by
+         the parameter route. Revenue counts paid orders only.</p></div>
+  </details>
+
+  <details class="ep" id="o-status">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/:orderId/status</span></span>
+      <span class="role admin">admin</span><span class="sum">Move it along</span></summary>
+    <div class="body">
+      <p>Body: <code>status</code>*. Delivery status follows automatically:
+         <code>Processing</code>&nbsp;&rarr;&nbsp;<code>Clearing</code>,
+         <code>Processed</code>&nbsp;&rarr;&nbsp;<code>Out for Delivery</code>,
+         <code>Delivered</code>&nbsp;&rarr;&nbsp;<code>Delivered</code> plus a
+         <code>deliveredAt</code> stamp, <code>Cancelled</code>&nbsp;&rarr;&nbsp;<code>Failed</code>.</p>
+      <p class="errs"><b>Errors:</b> <code>400</code> with a <code>validStatuses</code> array when the
+         value is not one of the five.</p></div>
+  </details>
+
+  <details class="ep" id="o-delivery">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/:orderId/delivery</span></span>
+      <span class="role admin">admin</span><span class="sum">Set delivery state</span></summary>
+    <div class="body">
+      <p>Body: <code>deliveryStatus</code>*. Marking it <code>Delivered</code> also sets the order
+         status and <code>deliveredAt</code>.</p></div>
+  </details>
+
+  <details class="ep" id="o-payment">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/:orderId/payment</span></span>
+      <span class="role admin">admin</span><span class="sum">Confirm payment</span></summary>
+    <div class="body">
+      <p>Body: <code>isPaid</code>*, <code>paymentResult</code>. Confirming payment stamps
+         <code>paidAt</code> and promotes a <code>Pending</code> order to <code>Processed</code>. This
+         is the manual counterpart to the Stripe webhook — the route used to clear a bank transfer.</p></div>
+  </details>
+
+  <details class="ep" id="o-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/:orderId</span></span>
+      <span class="role admin">admin</span><span class="sum">Delete an order</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Order deleted successfully." }</pre></div>
+  </details>
+</section>
+
+<section id="reminders">
+  <h2>Reminders</h2>
+  <p class="lead">A reminder pairs a meal with a time and a delivery channel. Times are stored in UTC and
+     rendered in the reminder's own zone; pending reminders are re-scheduled on every server boot.</p>
+
+  <div class="note">
+    <b>Three channels.</b> <code>email</code> sends a full HTML brief — image, ingredients, numbered
+    steps — through Brevo. <code>push</code> needs a Web Push subscription. <code>calendar</code>
+    writes an event into the user's Google Calendar, which requires the OAuth grant first.
+  </div>
+
+  <details class="ep" id="r-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/</span></span>
+      <span class="role session">session</span><span class="sum">Schedule one</span></summary>
+    <div class="body">
+      <p>Body: <code>meal</code>* (meal id), <code>reminderTime</code>*,
+         <code>notificationMethod</code>* (<code>email</code> | <code>push</code> |
+         <code>calendar</code>), <code>timezone</code> (IANA, defaults to <code>Africa/Lagos</code>),
+         <code>isRecurring</code>, <code>recurringFrequency</code> (<code>daily</code> |
+         <code>weekly</code> | <code>monthly</code>), <code>note</code> (&le;500 chars), and
+         <code>subscription</code> when the method is <code>push</code>.</p>
+      <h5>Request</h5>
+<pre>{ "meal": "66f1…", "reminderTime": "2026-08-04T17:30:00+01:00",
+  "notificationMethod": "email", "timezone": "Africa/Lagos",
+  "note": "Buy the peppers on the way home" }</pre>
+      <h5>201</h5>
+<pre>{ "reminder": { "_id": "…", "reminderTime": "2026-08-04T16:30:00.000Z",
+                "notified": false, "timezone": "Africa/Lagos" } }</pre>
+      <p class="errs"><b>Errors:</b> <code>400</code> for an unknown meal id, or for
+         <code>push</code> without a valid subscription. Send <code>reminderTime</code> with an explicit
+         offset — a bare local string is read as UTC.</p></div>
+  </details>
+
+  <details class="ep" id="r-mine">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/user</span></span>
+      <span class="role session">session</span><span class="sum">Your reminders</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "reminders": [ { …, "meal": { … } } ], "count": 3 }</pre>
+      <p class="errs">Returns <code>404 No reminders found for this user</code> rather than an empty
+         array when there are none.</p></div>
+  </details>
+
+  <details class="ep" id="r-all">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Admin listing</span></summary>
+    <div class="body">
+      <p>Requires the admin role but still filters to the caller's own reminders, so it returns the same
+         rows as <code>/reminders/user</code> — with an empty array instead of a <code>404</code>.</p>
+      <h5>200</h5>
+<pre>{ "reminders": [ … ], "count": 3 }</pre></div>
+  </details>
+
+  <details class="ep" id="r-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Reschedule or edit</span></summary>
+    <div class="body">
+      <p>Accepts <code>reminderTime</code>, <code>notificationMethod</code>, <code>isRecurring</code>,
+         <code>recurringFrequency</code> and <code>note</code>. The in-memory job is re-armed at the new
+         time and the meal is populated in the response.</p>
+      <p class="errs">Ownership is not checked — any signed-in user can edit any reminder id.</p></div>
+  </details>
+
+  <details class="ep" id="r-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Cancel</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Reminder deleted successfully" }</pre></div>
+  </details>
+
+  <details class="ep" id="r-subscribe">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/subscribe</span></span>
+      <span class="role session">session</span><span class="sum">Register a push device</span></summary>
+    <div class="body">
+      <p>Body: the browser's <code>PushSubscription</code> — <code>endpoint</code>* and
+         <code>keys.p256dh</code>* / <code>keys.auth</code>*.</p>
+      <h5>Request</h5>
+<pre>{ "endpoint": "https://fcm.googleapis.com/fcm/send/…",
+  "keys": { "p256dh": "BN…", "auth": "k9…" } }</pre>
+      <h5>201</h5>
+<pre>{ "message": "Push subscription saved successfully", "subscription": { … } }</pre>
+      <p class="errs">Each call inserts a new row; re-subscribing the same browser leaves the old one
+         behind.</p></div>
+  </details>
+
+  <details class="ep" id="r-push">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/send-push/:id</span></span>
+      <span class="role session">session</span><span class="sum">Fire one immediately</span></summary>
+    <div class="body">
+      <p>Sends the reminder's push notification now, ignoring its schedule — the way to verify a device
+         is wired up correctly.</p>
+      <h5>200</h5>
+<pre>{ "message": "Push notification sent successfully" }</pre></div>
+  </details>
+
+  <details class="ep" id="r-calendar">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/reminders</span><span class="p">/calendar-sync/:id</span></span>
+      <span class="role session">session</span><span class="sum">Write to Google Calendar</span></summary>
+    <div class="body">
+      <p>Creates a one-hour event holding the ingredients and steps, with email and popup alerts at 30
+         and 15 minutes. The returned event id is stored on the reminder.</p>
+      <h5>200</h5>
+<pre>{ "message": "Successfully synced with Google Calendar",
+  "eventLink": "https://www.google.com/calendar/event?eid=…", "reminder": { … } }</pre>
+      <p class="errs"><b>Errors:</b> <code>401 Google Calendar authentication required</code> when the
+         user has not completed the OAuth grant.</p></div>
+  </details>
+</section>
+
+<section id="reviews">
+  <h2>Reviews</h2>
+  <p class="lead">One review per user per meal, enforced by a compound index. Saving or deleting one
+     recalculates the meal's <code>averageRating</code> and <code>numOfReviews</code>.</p>
+
+  <details class="ep" id="rv-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/reviews</span><span class="p">/</span></span>
+      <span class="role session">session</span><span class="sum">Rate a meal</span></summary>
+    <div class="body">
+      <p>Body: <code>meal</code>* (meal id), <code>rating</code> (1&ndash;5), <code>title</code>
+         (&le;100 chars), <code>comment</code>.</p>
+      <h5>Request</h5>
+<pre>{ "meal": "66f1…", "rating": 5, "title": "Perfect", "comment": "Tasted like home." }</pre>
+      <h5>201</h5>
+<pre>{ "review": { … } }</pre>
+      <p class="errs"><b>Errors:</b> <code>400 No meal with id:…</code>, or
+         <code>400 Already submitted review for this meal</code>.</p></div>
+  </details>
+
+  <details class="ep" id="rv-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/reviews</span><span class="p">/</span></span>
+      <span class="role session">session</span><span class="sum">All reviews</span></summary>
+    <div class="body">
+      <p>Query: <code>search</code> (title or comment), <code>rating</code> (1&ndash;5 or
+         <code>all</code>), <code>sort</code> (<code>latest</code> | <code>oldest</code> |
+         <code>highest rating</code> | <code>lowest rating</code>), <code>page</code> — 10 per page.</p>
+      <h5>200</h5>
+<pre>{ "reviews": [ … ], "count": 21, "numOfPages": 3 }</pre>
+      <p class="errs"><code>count</code> is the total across all pages, not the length of this page.</p></div>
+  </details>
+
+  <details class="ep" id="rv-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/reviews</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">One review</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "review": { …, "meal": { … }, "user": { "fullName": "Jane Doe" } } }</pre></div>
+  </details>
+
+  <details class="ep" id="rv-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/reviews</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Edit your own</span></summary>
+    <div class="body">
+      <p>Author or admin only. All three fields are written unconditionally, so omitting one clears
+         it — send the whole review back.</p>
+      <p class="errs"><b>Errors:</b> <code>403</code> for someone else's review.</p></div>
+  </details>
+
+  <details class="ep" id="rv-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/reviews</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Remove your own</span></summary>
+    <div class="body">
+      <p>Author or admin only. The meal's average rating is recalculated afterwards.</p>
+      <h5>200</h5>
+<pre>{ "msg": "Success! Review removed" }</pre></div>
+  </details>
+</section>
+
+<section id="shopping">
+  <h2>Shopping lists</h2>
+  <p class="lead">A snapshot of one meal's ingredients with a price total. Lists <b>expire 24 hours
+     after creation</b> and are removed by a TTL index — this is a shopping trip, not a saved
+     collection.</p>
+
+  <details class="ep" id="s-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/shoppingLists</span><span class="p">/</span></span>
+      <span class="role session">session</span><span class="sum">Build from a meal</span></summary>
+    <div class="body">
+      <p>Body: <code>meal</code>* (meal id). Ingredients and <code>totalPrice</code> are copied from the
+         meal — nothing else is read from the request.</p>
+      <h5>201</h5>
+<pre>{ "shoppingList": { "_id": "…", "meal": "…", "ingredients": [ … ],
+                    "totalPrice": 8400, "checkedOut": false,
+                    "expiresAt": "2026-08-04T10:36:00.000Z" } }</pre></div>
+  </details>
+
+  <details class="ep" id="s-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/shoppingLists</span><span class="p">/</span></span>
+      <span class="role session">session</span><span class="sum">Your live lists</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "shoppingLists": [ … ], "count": 2 }</pre></div>
+  </details>
+
+  <details class="ep" id="s-rm">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/shoppingLists</span><span class="p">/:listId/remove-ingredient/:ingredientId</span></span>
+      <span class="role session">session</span><span class="sum">Cross one off</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Ingredient removed", "shoppingList": { … } }</pre>
+      <p class="errs"><code>totalPrice</code> is not recalculated — it still reflects the original
+         meal.</p></div>
+  </details>
+
+  <details class="ep" id="s-checkout">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/shoppingLists</span><span class="p">/:id/checkout</span></span>
+      <span class="role session">session</span><span class="sum">Mark as done</span></summary>
+    <div class="body">
+      <p>Sets <code>checkedOut</code>. It does not create an order or touch the cart.</p>
+      <h5>200</h5>
+<pre>{ "message": "Checked out successfully", "shoppingList": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="s-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/shoppingLists</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Delete early</span></summary>
+    <div class="body">
+      <h5>200</h5>
+<pre>{ "message": "Shopping list deleted successfully" }</pre></div>
+  </details>
+</section>
+
+<section id="blog">
+  <h2>Blog</h2>
+  <p class="lead">Editorial content with categories, comments and related-article lookup. Categories are
+     <code>General</code>, <code>Recipes</code>, <code>Nutrition</code>, <code>Cooking Tips</code>,
+     <code>Health</code> and <code>Other</code>; status is <code>draft</code> or
+     <code>published</code>.</p>
+
+  <details class="ep" id="b-list">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/</span></span>
+      <span class="role">public</span><span class="sum">Browse posts</span></summary>
+    <div class="body">
+      <p>Query: <code>category</code>, <code>status</code>, <code>search</code> (title or body),
+         <code>sort</code> (<code>newest</code> | <code>oldest</code> | <code>a-z</code> |
+         <code>z-a</code>), <code>page</code>, <code>limit</code>.</p>
+      <h5>200</h5>
+<pre>{ "blogs": [ … ], "totalBlogs": 6, "numOfPages": 1, "currentPage": 1 }</pre>
+      <p class="errs">Drafts are included unless you pass <code>status=published</code> — this listing
+         does not filter them out on its own.</p></div>
+  </details>
+
+  <details class="ep" id="b-get">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/:id</span></span>
+      <span class="role">public</span><span class="sum">One post, by id or slug</span></summary>
+    <div class="body">
+      <p>Accepts either the ObjectId or the slug. Only <code>published</code> posts are served, and up
+         to three related articles are chosen by shared category or keyword.</p>
+      <h5>200</h5>
+<pre>{ "blog": { …, "comments": [ … ] }, "relatedArticles": [ … ] }</pre></div>
+  </details>
+
+  <details class="ep" id="b-create">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/</span></span>
+      <span class="role admin">admin</span><span class="sum">Publish a post</span></summary>
+    <div class="body">
+      <p><code>multipart/form-data</code>. Fields: <code>title</code>* (&le;100),
+         <code>content</code>*, <code>category</code>*, <code>featuredImageAlt</code>*, a
+         <code>featuredImage</code> file* (&le;5&nbsp;MB), plus optional <code>slug</code>,
+         <code>metaTitle</code> (&le;60), <code>metaDescription</code> (&le;160),
+         <code>keywords</code>, <code>tags</code> and <code>status</code>.</p>
+      <h5>201</h5>
+<pre>{ "blog": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="b-patch">
+    <summary><span class="m patch">PATCH</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Edit your own post</span></summary>
+    <div class="body">
+      <p><code>multipart/form-data</code>. Author only — an admin who did not write the post gets
+         <code>401</code>, unlike create which is admin-gated.</p>
+      <h5>200</h5>
+<pre>{ "blog": { … } }</pre></div>
+  </details>
+
+  <details class="ep" id="b-delete">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/:id</span></span>
+      <span class="role session">session</span><span class="sum">Delete your own post</span></summary>
+    <div class="body">
+      <p>Author only. The Cloudinary image goes with it.</p>
+      <h5>200</h5>
+<pre>{ "message": "Blog deleted successfully" }</pre></div>
+  </details>
+
+  <details class="ep" id="b-comment">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/:id/comments</span></span>
+      <span class="role session">session</span><span class="sum">Comment</span></summary>
+    <div class="body">
+      <p>Body: <code>content</code>*. Returns the whole blog with comments populated, so the client can
+         re-render from one response.</p>
+      <p class="errs"><b>Errors:</b> <code>400</code> when the content is empty or whitespace.</p></div>
+  </details>
+
+  <details class="ep" id="b-uncomment">
+    <summary><span class="m delete">DELETE</span>
+      <span class="url"><span class="b">/api/v1/blogs</span><span class="p">/:id/comments/:commentId</span></span>
+      <span class="role session">session</span><span class="sum">Remove a comment</span></summary>
+    <div class="body">
+      <p>Allowed for the comment's author and for the post's author.</p>
+      <h5>200</h5>
+<pre>{ "blog": { … } }</pre></div>
+  </details>
+</section>
+
+<section id="payments">
+  <h2>Payments</h2>
+  <p class="lead">Card payments go through Stripe Checkout and are confirmed by webhook. Bank transfers
+     create an unpaid order that an admin clears by hand.</p>
+
+  <details class="ep" id="pay-stripe">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/payment</span><span class="p">/create-stripe-session</span></span>
+      <span class="role session">session</span><span class="sum">Start Checkout</span></summary>
+    <div class="body">
+      <p>Body: <code>cartItems</code>*, <code>shippingAddress</code>*, <code>userId</code>*,
+         <code>totalAmount</code>. Writes an unpaid order first, then opens a Checkout session carrying
+         that order id in its metadata. One line item per meal, priced in kobo, plus a shipping line.</p>
+      <h5>200</h5>
+<pre>{ "sessionId": "cs_test_a1B2…" }</pre>
+      <p class="errs">Redirect the browser to Stripe with this id. Success returns to
+         <code>CLIENT_URL/order-success</code>, cancel to <code>CLIENT_URL/checkout</code>. Note the
+         amount is taken from the request, so it should be validated against the cart server-side before
+         this is trusted in production.</p></div>
+  </details>
+
+  <details class="ep" id="pay-bank">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/payment</span><span class="p">/orders/place</span></span>
+      <span class="role session">session</span><span class="sum">Order by bank transfer</span></summary>
+    <div class="body">
+      <p>Body: <code>cartItems</code>*, <code>shippingAddress</code>*, <code>paymentMethod</code>,
+         <code>taxPrice</code>, <code>shippingPrice</code>, <code>totalAmount</code>,
+         <code>transactionId</code>. Saved with <code>isPaid: false</code> and a payment result of
+         <code>pending</code>; a reference of the form <code>BT-&lt;timestamp&gt;</code> is generated if
+         none is supplied.</p>
+      <h5>201</h5>
+<pre>{ "order": { … },
+  "message": "Order placed successfully. We will process it once your payment is verified." }</pre>
+      <p class="errs">Clear it later with <code>PATCH /orders/:orderId/payment</code>.</p></div>
+  </details>
+
+  <details class="ep" id="pay-webhook">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">https://mealmaster1.onrender.com</span><span class="p">/api/v1/payment/webhook</span></span>
+      <span class="role">public</span><span class="sum">Stripe callback</span></summary>
+    <div class="body">
+      <p>For Stripe, not for clients. Mounted at the top of the stack ahead of the JSON body parser so
+         the raw bytes survive for signature verification, and rejected with <code>400</code> if the
+         signature does not check out.</p>
+      <p>On <code>checkout.session.completed</code> the matching order is marked paid, stamped with
+         <code>paidAt</code> and the session id, and pushed onto the user's <code>orders</code> array.
+         Every other event type is acknowledged and ignored.</p>
+      <h5>200</h5>
+<pre>{ "received": true }</pre></div>
+  </details>
+</section>
+
+</main>
+</div>
+
+<footer>
+  <div class="wrap">
+    MealMaster API &middot; Express on Render, MongoDB Atlas, Cloudinary, Stripe, Brevo, Web Push and
+    Google Calendar. Health at <a href="/health">/health</a>.
+  </div>
+</footer>
+
+</body>
+</html>

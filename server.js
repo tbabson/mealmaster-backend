@@ -60,8 +60,6 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-initializeReminderSystem(); // Start the reminder scheduler
-
 // Frontend served separately on Render Static Site
 
 // Updated CORS configuration
@@ -125,8 +123,23 @@ app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/cart', cartRoutes);
 app.use('/api/v1/payment', paymentRoutes);
 
+// API reference page
 app.get('/', (req, res) => {
-  res.json({ msg: 'MealMaster API is running' });
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Health check — reports DB connectivity, 503 when the database is unreachable
+app.get('/health', (req, res) => {
+  const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+  const dbState = states[mongoose.connection.readyState] || 'unknown';
+  const healthy = mongoose.connection.readyState === 1;
+
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    uptime: Math.floor(process.uptime()),
+    timestamp: new Date().toISOString(),
+    database: dbState,
+  });
 });
 
 app.get('*', (req, res) => {
@@ -141,6 +154,7 @@ const port = process.env.PORT || 8000;
 
 try {
   await mongoose.connect(process.env.MONGO_URL);
+  await initializeReminderSystem(); // Start the reminder scheduler (needs an open DB connection)
   app.listen(port, '0.0.0.0', () => {
     console.log(`server running on PORT ${port}...`);
 
