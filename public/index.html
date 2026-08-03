@@ -166,6 +166,11 @@
   <a href="#r-subscribe">Save push device</a>
   <a href="#r-push">Send push</a>
   <a href="#r-calendar">Calendar sync</a>
+  <h4>Nutrition</h4>
+  <a href="#n-profile">Your profile</a>
+  <a href="#n-recs">Recommendations</a>
+  <a href="#n-generate">Generate for a meal</a>
+  <a href="#n-backfill">Backfill</a>
   <h4>Reviews</h4>
   <a href="#rv-create">Create</a>
   <a href="#rv-list">List</a>
@@ -1066,6 +1071,120 @@
   "eventLink": "https://www.google.com/calendar/event?eid=…", "reminder": { … } }</pre>
       <p class="errs"><b>Errors:</b> <code>401 Google Calendar authentication required</code> when the
          user has not completed the OAuth grant.</p></div>
+  </details>
+</section>
+
+<section id="nutrition">
+  <h2>Nutrition</h2>
+  <p class="lead">Per-serving nutrition is estimated from a meal's ingredient list by OpenAI and
+     <b>stored on the meal</b> — reads never call the model. Recommendations compare a customer's
+     ordering history against reference daily values and rank meals that balance it out.</p>
+
+  <div class="note">
+    <b>The model estimates; the server does the arithmetic.</b> Averages, totals and gap detection
+    are computed in JavaScript from stored values. OpenAI is used only to turn ingredients into
+    numbers, and to write the reasoning attached to each recommendation.
+  </div>
+
+  <div class="note warn">
+    <b>Guidance, not diagnosis.</b> Every response carries a <code>disclaimer</code> field. Values are
+    estimates derived from ingredient lists — not a laboratory analysis, and not medical advice.
+    Surface the disclaimer wherever you surface the numbers.
+  </div>
+
+  <details class="ep" id="n-profile">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/nutrition</span><span class="p">/profile</span></span>
+      <span class="role session">session</span><span class="sum">What your orders add up to</span></summary>
+    <div class="body">
+      <p>Aggregates every order the caller has placed, weighting each meal by how often it was
+         ordered, and compares the average against FDA Daily Values split across three meals a day.
+         No OpenAI call — pure database read plus arithmetic.</p>
+      <h5>200</h5>
+<pre>{ "profile": {
+    "hasHistory": true, "ordersAnalysed": 12, "distinctMealsOrdered": 6,
+    "mealsWithNutrition": 6, "mealsMissingNutrition": [],
+    "averagePerMeal":   { "calories": 547.2, "protein": 26.5, "fiber": 6.9, "sodium": 487.1, … },
+    "referencePerMeal": { "calories": 666.7, "protein": 16.7, "fiber": 9.3,  "sodium": 766.7, … },
+    "gaps": [ { "nutrient": "fiber", "direction": "low", "label": "low fiber",
+                "averagePerMeal": 6.9, "referencePerMeal": 9.3, "percentOfReference": 74 } ],
+    "mostOrdered": [ { "_id": "…", "name": "Okro Soup with Fufu", "timesOrdered": 3 } ] },
+  "disclaimer": "…" }</pre>
+      <p class="errs">A meal counts in full each time it is ordered, even though an order stores only
+         the ingredients actually bought — good enough to spot patterns, but it overstates intake for
+         partial carts. <code>averagePerMeal</code> is <code>null</code> when no ordered meal has
+         nutrition yet; the endpoint never invents numbers to fill the gap.</p></div>
+  </details>
+
+  <details class="ep" id="n-recs">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/nutrition</span><span class="p">/recommendations</span></span>
+      <span class="role session">session</span><span class="sum">Meals that balance your diet</span></summary>
+    <div class="body">
+      <p>Query: <code>limit</code> (default 5, max 10), <code>refresh=true</code> to force
+         regeneration. Candidates are meals with nutrition that the caller does not already order
+         frequently.</p>
+
+      <h5>Caching</h5>
+      <p>The result is cached per user against a fingerprint of everything it depends on — order
+         history, computed gaps, and each candidate's nutrition. <b>A page reload does not call
+         OpenAI.</b> The cache invalidates by itself when a new order is placed, a meal's nutrition is
+         regenerated, or a different <code>limit</code> is requested; reordering the candidate list
+         does not invalidate it.</p>
+      <h5>200</h5>
+<pre>{ "profile": { … },
+  "summary": "Your meals lean carbohydrate-heavy with solid protein…",
+  "recommendations": [
+    { "meal": { "_id": "…", "name": "Akara (Bean Cakes)", "image": "https://…",
+                "mealType": "Breakfast", "country": "Nigeria",
+                "nutrition": { "calories": 322, "protein": 12.8, "fiber": 10.8, … } },
+      "reason": "Provides 12.8 g of protein and 10.8 g of fibre without adding much sodium (330 mg).",
+      "addresses": ["fiber"] } ],
+  "cached": true, "generatedAt": "2026-08-03T14:32:14.482Z",
+  "disclaimer": "…" }</pre>
+      <p class="errs">Two guardrails on the model's output: returned meal ids are resolved against the
+         candidate set and anything unrecognised is dropped, and <code>addresses</code> is filtered to
+         gaps that were actually computed — so the UI can never claim to fix something the profile did
+         not report. Returns an empty <code>recommendations</code> array with an explanatory
+         <code>summary</code> when there is no history or no meal has nutrition yet.</p></div>
+  </details>
+
+  <details class="ep" id="n-generate">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/nutrition</span><span class="p">/meals/:id</span></span>
+      <span class="role admin">admin</span><span class="sum">Estimate one meal</span></summary>
+    <div class="body">
+      <p>Sends the meal's populated ingredients to OpenAI under a strict JSON schema and stores the
+         result on the meal. <b>Skips meals that already have nutrition</b> unless you pass
+         <code>?force=true</code> — so it is safe to call repeatedly without spending tokens.</p>
+      <h5>200</h5>
+<pre>{ "message": "Nutrition generated",
+  "meal": { "_id": "…", "name": "Akara (Bean Cakes)",
+            "nutrition": { "servings": 6, "calories": 322, "protein": 12.8,
+                           "carbohydrates": 44.6, "fat": 14.4, "fiber": 10.8,
+                           "sugar": 2.1, "sodium": 330,
+                           "highlights": ["high in protein", "good source of fiber"],
+                           "caveats": "Assumed a standard household portion for the oil.",
+                           "source": "openai", "model": "gpt-4o-mini-2024-07-18",
+                           "generatedAt": "2026-08-03T14:12:02.101Z" } },
+  "disclaimer": "…" }</pre>
+      <p class="errs"><b>Errors:</b> <code>404</code> unknown meal; <code>402</code> the OpenAI account
+         has no credits; <code>429</code> rate limited; <code>503</code> key rejected, model
+         unavailable, or OpenAI down. A meal with no ingredients cannot be estimated.</p></div>
+  </details>
+
+  <details class="ep" id="n-backfill">
+    <summary><span class="m post">POST</span>
+      <span class="url"><span class="b">/api/v1/nutrition</span><span class="p">/backfill</span></span>
+      <span class="role admin">admin</span><span class="sum">Fill every meal that lacks nutrition</span></summary>
+    <div class="body">
+      <p>Query: <code>limit</code> (default 10). Processes meals one at a time and reports each
+         outcome, so one bad meal does not abort the batch.</p>
+      <h5>200</h5>
+<pre>{ "processed": 12, "succeeded": 12, "remaining": 0,
+  "results": [ { "_id": "…", "name": "Jollof Rice", "status": "ok" },
+               { "_id": "…", "name": "Broken Meal", "status": "failed", "error": "…" } ],
+  "disclaimer": "…" }</pre></div>
   </details>
 </section>
 
