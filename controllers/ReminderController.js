@@ -37,15 +37,19 @@ export const savePushSubscription = async (req, res) => {
     }
 
     try {
-        // Save subscription to the database
-        const subscription = await Subscription.create({
-            endpoint,
-            keys: {
-                p256dh: keys.p256dh,
-                auth: keys.auth,
+        // Upsert on endpoint — a browser re-subscribing must not leave a stale row behind
+        const subscription = await Subscription.findOneAndUpdate(
+            { endpoint },
+            {
+                endpoint,
+                keys: {
+                    p256dh: keys.p256dh,
+                    auth: keys.auth,
+                },
+                user: userId,
             },
-            user: userId, // Add the user ID
-        });
+            { new: true, upsert: true, setDefaultsOnInsert: true }
+        );
 
         res.status(StatusCodes.CREATED).json({ message: 'Push subscription saved successfully', subscription });
     } catch (error) {
@@ -87,15 +91,19 @@ export const createReminder = async (req, res) => {
                 });
             }
 
-            // Save the subscription for push notifications
-            savedSubscription = await Subscription.create({
-                endpoint: subscription.endpoint,
-                keys: {
-                    p256dh: subscription.keys.p256dh,
-                    auth: subscription.keys.auth
+            // Reuse the row for this endpoint rather than adding one per reminder
+            savedSubscription = await Subscription.findOneAndUpdate(
+                { endpoint: subscription.endpoint },
+                {
+                    endpoint: subscription.endpoint,
+                    keys: {
+                        p256dh: subscription.keys.p256dh,
+                        auth: subscription.keys.auth
+                    },
+                    user: userId
                 },
-                user: userId
-            });
+                { new: true, upsert: true, setDefaultsOnInsert: true }
+            );
         }
 
         const utcReminderTime = moment(reminderTime).utc().toISOString();
@@ -142,9 +150,12 @@ export const getSingleUserReminders = async (req, res) => {
 // @route POST /api/reminders/send-push/:id
 export const sendPushNotification = async (req, res) => {
     const { id } = req.params;
+    let reminder = null; // hoisted so the catch can prune the dead subscription
 
     try {
-        const reminder = await Reminder.findById(id).populate('user meal');
+        // `subscription` must be populated too — it is a ref, so without this
+        // reminder.subscription.endpoint is always undefined
+        reminder = await Reminder.findById(id).populate('user meal subscription');
         if (!reminder) {
             return res.status(StatusCodes.NOT_FOUND).json({ message: 'Reminder not found' });
         }
@@ -166,13 +177,24 @@ export const sendPushNotification = async (req, res) => {
         // Create the notification payload
         const payload = JSON.stringify({
             title: `Meal Reminder: ${reminder.meal.name}`,
-            body: `Hello ${reminder.user.fullName}, it's time to prepare your meal: ${reminder.meal.name}. Ingredients: ${reminder.meal.ingredients.map(ingredient => ingredient.name).join(', ')}.`
+            body: `Hello ${reminder.user.fullName}, it's time to prepare your meal: ${reminder.meal.name}. Ingredients: ${reminder.meal.ingredients.map(ingredient => ingredient.name).join(', ')}.`,
+            icon: reminder.meal.image || '/icons/icon-192.png',
+            badge: '/icons/badge-72.png',
+            data: { url: `/meal/${reminder.meal._id}` },
         });
 
         // Send the push notification
         await webPush.sendNotification(subscription, payload);
         res.status(StatusCodes.OK).json({ message: 'Push notification sent successfully' });
     } catch (error) {
+        // The browser discarded this subscription — drop it instead of retrying forever
+        if ((error.statusCode === 404 || error.statusCode === 410) && reminder?.subscription) {
+            await Subscription.findByIdAndDelete(reminder.subscription._id);
+            await Reminder.findByIdAndUpdate(id, { subscription: null });
+            return res.status(StatusCodes.GONE).json({
+                message: 'This push subscription has expired. Re-enable notifications on that device.'
+            });
+        }
         res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
     }
 };

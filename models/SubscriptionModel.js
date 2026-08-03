@@ -4,6 +4,9 @@ const SubscriptionSchema = new mongoose.Schema({
     endpoint: {
         type: String,
         required: true,
+        // One row per browser endpoint. The controllers upsert on this field;
+        // the index is what stops concurrent subscribes racing into duplicates.
+        unique: true,
     },
     keys: {
         p256dh: {

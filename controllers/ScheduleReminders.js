@@ -348,8 +348,8 @@ const sendPushNotification = async (reminder) => {
     const payload = JSON.stringify({
       title: `Meal Reminder: ${reminder.meal.name}`,
       body: `Hello! It's time to prepare your meal: ${reminder.meal.name}. Check the details in your app.`,
-      icon: reminder.meal.image || '/public/favchrome.png',
-      badge: '/public/favicon.ico',
+      icon: reminder.meal.image || '/icons/icon-192.png',
+      badge: '/icons/badge-72.png',
       image: reminder.meal.image,
       data: {
         mealId: reminder.meal._id,
@@ -374,6 +374,13 @@ const sendPushNotification = async (reminder) => {
     console.log('Push notification sent successfully');
     return true;
   } catch (error) {
+    // 404/410 mean the browser threw the subscription away — stop pushing to it
+    if (error.statusCode === 404 || error.statusCode === 410) {
+      console.log(`Pruning expired push subscription ${reminder.subscription}`);
+      await Subscription.findByIdAndDelete(reminder.subscription);
+      await Reminder.findByIdAndUpdate(reminder._id, { subscription: null });
+      return false;
+    }
     console.error('Error sending push notification:', error);
     return false;
   }
