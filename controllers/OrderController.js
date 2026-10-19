@@ -6,415 +6,362 @@ import Blog from '../models/BlogModel.js';
 import Review from '../models/ReviewModel.js';
 import { StatusCodes } from "http-status-codes";
 import { ORDERS, DELIVERY } from "../utils/constants.js";
+import { BadRequestError, NotFoundError } from '../errors/customErrors.js';
+import { ownerFilter } from '../middleware/authMiddleware.js';
+import { priceCartItems, calculateTotals } from '../utils/pricing.js';
+import { containsFilter } from '../utils/escapeRegex.js';
+import { getPagination } from '../utils/pagination.js';
 
-// ✅ Place an Order
+// A Stripe order is created before the customer pays; until the webhook marks
+// it paid it is just an open checkout, not a sale. Bank-transfer orders are
+// real orders from the moment they are placed (payment is verified later).
+export const PLACED_ORDER_FILTER = {
+  $or: [{ paymentMethod: { $ne: 'stripe' } }, { isPaid: true }],
+};
+
+// ✅ Place an Order — from the caller's own server-side cart
 export const placeOrder = async (req, res) => {
-  try {
-    const { userId, shippingAddress, paymentMethod, transactionId } = req.body;
+  const userId = req.user.userId;
+  const { shippingAddress, paymentMethod, transactionId } = req.body;
 
-    if (!userId || !shippingAddress || !paymentMethod) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "User ID, shipping address, and payment method are required."
-      });
-    }
-
-    const cart = await Cart.findOne({ userId });
-
-    if (!cart || cart.cartItems.length === 0) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Cart is empty. Add items before placing an order."
-      });
-    }
-
-    // Calculate order totals, matching the cart slice logic
-    const totalAmount = cart.cartItems.reduce((total, meal) => {
-      return total + meal.ingredients.reduce((sum, ing) => sum + ing.price * ing.quantity, 0);
-    }, 0);
-
-    const taxPrice = totalAmount * 0.1; // 10% tax rate from cart slice
-    const shippingPrice = 300; // Default from cart slice
-
-    // Generate a random tracking number
-    const trackingNumber = `TRACK${Math.floor(Math.random() * 100000)}`;
-
-    const order = new Order({
-      userId,
-      cartItems: cart.cartItems,
-      totalAmount: totalAmount + taxPrice + shippingPrice,
-      shippingAddress,
-      paymentMethod,
-      transactionId,
-      taxPrice,
-      shippingPrice,
-      status: ORDERS.PENDING,
-      deliveryStatus: DELIVERY.SCHEDULED,
-      trackingNumber, // Set the tracking number here
-    });
-
-    await order.save();
-
-    // Clear the cart after placing the order
-    cart.cartItems = [];
-    await cart.save();
-
-    res.status(StatusCodes.CREATED).json(order);
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to place order.",
-      error: error.message
-    });
+  if (!shippingAddress || !paymentMethod) {
+    throw new BadRequestError("Shipping address and payment method are required.");
   }
+
+  const cart = await Cart.findOne({ userId });
+
+  if (!cart || cart.cartItems.length === 0) {
+    throw new BadRequestError("Cart is empty. Add items before placing an order.");
+  }
+
+  // Reprice against the catalogue — cart rows may hold stale or tampered prices
+  const cartItems = await priceCartItems(cart.cartItems.map((item) => item.toObject()));
+  const { taxPrice, shippingPrice, totalAmount } = calculateTotals(cartItems);
+
+  const order = await Order.create({
+    userId,
+    cartItems,
+    totalAmount,
+    shippingAddress,
+    paymentMethod,
+    transactionId,
+    taxPrice,
+    shippingPrice,
+    status: ORDERS.PENDING,
+    deliveryStatus: DELIVERY.SCHEDULED,
+  });
+
+  await User.findByIdAndUpdate(userId, { $addToSet: { orders: order._id } });
+
+  // Clear the cart after placing the order
+  cart.cartItems = [];
+  await cart.save();
+
+  res.status(StatusCodes.CREATED).json(order);
 };
 
-
-
-// ✅ Get Orders for a User
+// ✅ Get Orders for a User (self or admin, enforced on the route)
 export const getUserOrders = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const orders = await Order.find({ userId }).sort({ createdAt: -1 });
-    res.status(StatusCodes.OK).json({ orders });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to retrieve orders.",
-      error: error.message
-    });
-  }
+  const { userId } = req.params;
+  const orders = await Order.find({ userId }).sort({ createdAt: -1 });
+  res.status(StatusCodes.OK).json({ orders });
 };
 
-// ✅ Get Order by ID
+// ✅ Get Order by ID — owner or admin
 export const getOrderById = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const order = await Order.findById(orderId).populate('userId', 'name email');
+  const { orderId } = req.params;
+  const order = await Order.findOne({ _id: orderId, ...ownerFilter(req, 'userId') })
+    .populate('userId', 'fullName email');
 
-    if (!order) {
-      return res.status(StatusCodes.NOT_FOUND).json({ message: "Order not found." });
-    }
-
-    res.status(StatusCodes.OK).json({ order });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to fetch order.",
-      error: error.message
-    });
+  if (!order) {
+    throw new NotFoundError("Order not found.");
   }
+
+  res.status(StatusCodes.OK).json({ order });
+};
+
+// ✅ Get the order created for a Stripe Checkout session (order-success page).
+// The webhook may not have marked it paid yet — isPaid tells the client which.
+export const getOrderBySession = async (req, res) => {
+  const { sessionId } = req.params;
+  const order = await Order.findOne({
+    transactionId: String(sessionId),
+    paymentMethod: 'stripe',
+    ...ownerFilter(req, 'userId'),
+  });
+
+  if (!order) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  res.status(StatusCodes.OK).json({ order });
 };
 
 // ✅ Update Order Status
 export const updateOrderStatus = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { status } = req.body;
+  const { orderId } = req.params;
+  const { status } = req.body;
 
-    if (!Object.values(ORDERS).includes(status)) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Invalid order status.",
-        validStatuses: Object.values(ORDERS)
-      });
-    }
-
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(StatusCodes.NOT_FOUND).json({ message: "Order not found." });
-    }
-
-    order.status = status;
-
-    // Update delivery status if relevant
-    if (status === ORDERS.DELIVERED) {
-      order.deliveryStatus = DELIVERY.DELIVERED;
-      order.deliveredAt = new Date();
-    } else if (status === ORDERS.PROCESSED) {
-      // When the order is processed, delivery status becomes out for delivery
-      order.deliveryStatus = DELIVERY.OUTFORDELIVERY;
-    } else if (status === ORDERS.PROCESSING) {
-      // If the order is processing, we can set delivery status to clearing
-      order.deliveryStatus = DELIVERY.CLEARING;
-    } else if (status === ORDERS.CANCELLED) {
-      // If the order is cancelled, set delivery as failed
-      order.deliveryStatus = DELIVERY.FAILED;
-    }
-
-    await order.save();
-
-    res.status(StatusCodes.OK).json({ order });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to update order status.",
-      error: error.message
+  if (!Object.values(ORDERS).includes(status)) {
+    return res.status(StatusCodes.BAD_REQUEST).json({
+      message: "Invalid order status.",
+      validStatuses: Object.values(ORDERS)
     });
   }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  order.status = status;
+
+  // Update delivery status if relevant
+  if (status === ORDERS.DELIVERED) {
+    order.deliveryStatus = DELIVERY.DELIVERED;
+    order.deliveredAt = new Date();
+  } else if (status === ORDERS.PROCESSED) {
+    // When the order is processed, delivery status becomes out for delivery
+    order.deliveryStatus = DELIVERY.OUTFORDELIVERY;
+  } else if (status === ORDERS.PROCESSING) {
+    // If the order is processing, we can set delivery status to clearing
+    order.deliveryStatus = DELIVERY.CLEARING;
+  } else if (status === ORDERS.CANCELLED) {
+    // If the order is cancelled, set delivery as failed
+    order.deliveryStatus = DELIVERY.FAILED;
+  }
+
+  await order.save();
+
+  res.status(StatusCodes.OK).json({ order });
 };
 
 // ✅ Update Delivery Status
 export const updateDeliveryStatus = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { deliveryStatus } = req.body;
+  const { orderId } = req.params;
+  const { deliveryStatus } = req.body;
 
-    if (!Object.values(DELIVERY).includes(deliveryStatus)) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Invalid delivery status.",
-        validStatuses: Object.values(DELIVERY)
-      });
-    }
-
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(StatusCodes.NOT_FOUND).json({ message: "Order not found." });
-    }
-
-    order.deliveryStatus = deliveryStatus;
-
-    // Update order status if delivery status changes
-    if (deliveryStatus === DELIVERY.DELIVERED) {
-      order.status = ORDERS.DELIVERED;
-      order.deliveredAt = new Date();
-    } else if (deliveryStatus === DELIVERY.FAILED) {
-      // Optional: you might want to handle failed deliveries differently
-      // For example, by allowing redelivery or cancellation
-    }
-
-    await order.save();
-
-    res.status(StatusCodes.OK).json({ order });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to update delivery status.",
-      error: error.message
+  if (!Object.values(DELIVERY).includes(deliveryStatus)) {
+    return res.status(StatusCodes.BAD_REQUEST).json({
+      message: "Invalid delivery status.",
+      validStatuses: Object.values(DELIVERY)
     });
   }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  order.deliveryStatus = deliveryStatus;
+
+  // Update order status if delivery status changes
+  if (deliveryStatus === DELIVERY.DELIVERED) {
+    order.status = ORDERS.DELIVERED;
+    order.deliveredAt = new Date();
+  }
+
+  await order.save();
+
+  res.status(StatusCodes.OK).json({ order });
 };
 
-// ✅ Update Payment Status
+// ✅ Update Payment Status (admin, e.g. after verifying a bank transfer)
 export const updatePaymentStatus = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { isPaid, paymentResult } = req.body;
+  const { orderId } = req.params;
+  const { isPaid, paymentResult } = req.body;
 
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(StatusCodes.NOT_FOUND).json({ message: "Order not found." });
-    }
-
-    order.isPaid = isPaid;
-    if (isPaid) {
-      order.paidAt = new Date();
-
-      // If payment is confirmed, update order status to processed 
-      // (only if it was in pending state)
-      if (order.status === ORDERS.PENDING) {
-        order.status = ORDERS.PROCESSED;
-      }
-    }
-
-    if (paymentResult) {
-      order.paymentResult = paymentResult;
-    }
-
-    await order.save();
-
-    res.status(StatusCodes.OK).json({ order });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to update payment status.",
-      error: error.message
-    });
+  if (typeof isPaid !== 'boolean') {
+    throw new BadRequestError('isPaid must be true or false');
   }
+
+  const order = await Order.findById(orderId);
+  if (!order) {
+    throw new NotFoundError("Order not found.");
+  }
+
+  order.isPaid = isPaid;
+  if (isPaid) {
+    order.paidAt = new Date();
+
+    // If payment is confirmed, update order status to processed
+    // (only if it was in pending state)
+    if (order.status === ORDERS.PENDING) {
+      order.status = ORDERS.PROCESSED;
+    }
+  }
+
+  if (paymentResult) {
+    const { id, status, update_time, email_address } = paymentResult;
+    order.paymentResult = { id, status, update_time, email_address };
+  }
+
+  await order.save();
+
+  res.status(StatusCodes.OK).json({ order });
 };
 
 // ✅ Admin Stats
 export const getAdminStats = async (req, res) => {
-  try {
-    const now = new Date();
-    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  const now = new Date();
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-    const [
-      totalOrders,
-      totalUsers,
-      totalMeals,
-      totalBlogs,
-      totalReviews,
-      ordersByStatus,
-      ordersByDelivery,
-      recentOrders,
-      monthlyData,
-      topMeals,
-    ] = await Promise.all([
-      Order.countDocuments(),
-      User.countDocuments(),
-      Meal.countDocuments(),
-      Blog.countDocuments(),
-      Review.countDocuments(),
+  const [
+    totalOrders,
+    totalUsers,
+    totalMeals,
+    totalBlogs,
+    totalReviews,
+    ordersByStatus,
+    ordersByDelivery,
+    recentOrders,
+    monthlyData,
+    topMeals,
+    totalRevenue,
+    pendingOrders,
+  ] = await Promise.all([
+    Order.countDocuments(PLACED_ORDER_FILTER),
+    User.countDocuments(),
+    Meal.countDocuments(),
+    Blog.countDocuments(),
+    Review.countDocuments(),
 
-      // Orders grouped by status
-      Order.aggregate([
-        { $group: { _id: '$status', count: { $sum: 1 } } },
-      ]),
+    // Orders grouped by status
+    Order.aggregate([
+      { $match: PLACED_ORDER_FILTER },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]),
 
-      // Orders grouped by delivery status
-      Order.aggregate([
-        { $group: { _id: '$deliveryStatus', count: { $sum: 1 } } },
-      ]),
+    // Orders grouped by delivery status
+    Order.aggregate([
+      { $match: PLACED_ORDER_FILTER },
+      { $group: { _id: '$deliveryStatus', count: { $sum: 1 } } },
+    ]),
 
-      // 5 most recent orders with user info
-      Order.find()
-        .sort({ createdAt: -1 })
-        .limit(5)
-        .populate('userId', 'fullName email'),
+    // 5 most recent orders with user info
+    Order.find(PLACED_ORDER_FILTER)
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate('userId', 'fullName email'),
 
-      // Monthly orders + revenue for last 6 months
-      Order.aggregate([
-        { $match: { createdAt: { $gte: sixMonthsAgo } } },
-        {
-          $group: {
-            _id: {
-              year: { $year: '$createdAt' },
-              month: { $month: '$createdAt' },
-            },
-            orders: { $sum: 1 },
-            revenue: { $sum: '$totalAmount' },
+    // Monthly orders + revenue (paid orders only) for last 6 months
+    Order.aggregate([
+      { $match: { ...PLACED_ORDER_FILTER, createdAt: { $gte: sixMonthsAgo } } },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' },
           },
+          orders: { $sum: 1 },
+          revenue: { $sum: { $cond: ['$isPaid', '$totalAmount', 0] } },
         },
-        { $sort: { '_id.year': 1, '_id.month': 1 } },
-      ]),
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+    ]),
 
-      // Top 5 meals by how many times they appear in orders
-      Order.aggregate([
-        { $unwind: '$cartItems' },
-        { $group: { _id: '$cartItems.name', orders: { $sum: 1 } } },
-        { $sort: { orders: -1 } },
-        { $limit: 5 },
-      ]),
-    ]);
+    // Top 5 meals by how many times they appear in orders
+    Order.aggregate([
+      { $match: PLACED_ORDER_FILTER },
+      { $unwind: '$cartItems' },
+      { $group: { _id: '$cartItems.name', orders: { $sum: 1 } } },
+      { $sort: { orders: -1 } },
+      { $limit: 5 },
+    ]),
 
-    const totalRevenue = await Order.aggregate([
+    Order.aggregate([
       { $match: { isPaid: true } },
       { $group: { _id: null, total: { $sum: '$totalAmount' } } },
-    ]);
+    ]),
 
-    const pendingOrders = await Order.countDocuments({ status: ORDERS.PENDING });
+    Order.countDocuments({ ...PLACED_ORDER_FILTER, status: ORDERS.PENDING }),
+  ]);
 
-    // Fill in missing months so chart always shows 6 bars
-    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const filledMonthly = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const found = monthlyData.find(
-        (m) => m._id.year === d.getFullYear() && m._id.month === d.getMonth() + 1
-      );
-      filledMonthly.push({
-        month: monthNames[d.getMonth()],
-        orders: found?.orders || 0,
-        revenue: found?.revenue || 0,
-      });
-    }
-
-    res.status(StatusCodes.OK).json({
-      totals: {
-        orders: totalOrders,
-        revenue: totalRevenue[0]?.total || 0,
-        users: totalUsers,
-        meals: totalMeals,
-        blogs: totalBlogs,
-        reviews: totalReviews,
-        pendingOrders,
-      },
-      ordersByStatus,
-      ordersByDelivery,
-      recentOrders,
-      monthlyData: filledMonthly,
-      topMeals,
-    });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: 'Failed to fetch admin stats.',
-      error: error.message,
+  // Fill in missing months so chart always shows 6 bars
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const filledMonthly = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const found = monthlyData.find(
+      (m) => m._id.year === d.getFullYear() && m._id.month === d.getMonth() + 1
+    );
+    filledMonthly.push({
+      month: monthNames[d.getMonth()],
+      orders: found?.orders || 0,
+      revenue: found?.revenue || 0,
     });
   }
+
+  res.status(StatusCodes.OK).json({
+    totals: {
+      orders: totalOrders,
+      revenue: totalRevenue[0]?.total || 0,
+      users: totalUsers,
+      meals: totalMeals,
+      blogs: totalBlogs,
+      reviews: totalReviews,
+      pendingOrders,
+    },
+    ordersByStatus,
+    ordersByDelivery,
+    recentOrders,
+    monthlyData: filledMonthly,
+    topMeals,
+  });
 };
 
 // ✅ Delete an Order
 export const deleteOrder = async (req, res) => {
-  try {
-    const { orderId } = req.params;
+  const { orderId } = req.params;
 
-    const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(StatusCodes.NOT_FOUND).json({ message: "Order not found." });
-    }
-
-    await order.deleteOne();
-    res.status(StatusCodes.OK).json({ message: "Order deleted successfully." });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to delete order.",
-      error: error.message
-    });
+  const order = await Order.findByIdAndDelete(orderId);
+  if (!order) {
+    throw new NotFoundError("Order not found.");
   }
+
+  await User.findByIdAndUpdate(order.userId, { $pull: { orders: order._id } });
+  res.status(StatusCodes.OK).json({ message: "Order deleted successfully." });
 };
 
 // ✅ Get All Orders (Admin)
 export const getAllOrders = async (req, res) => {
-  try {
-    const { search, status, delivery, sort, page = 1 } = req.query;
-    const limit = 10; // Number of orders per page
+  const { search, status, delivery, sort } = req.query;
+  const { limit, skip } = getPagination({ page: req.query.page, limit: 10 });
 
-    // Build query
-    const queryObject = {};
+  // Build query
+  const queryObject = {};
 
-    // Add filters
-    if (status && status !== 'all') {
-      queryObject.status = status;
-    }
-    if (delivery && delivery !== 'all') {
-      queryObject.deliveryStatus = delivery;
-    }
-    if (search) {
-      queryObject.$or = [
-        { 'shippingAddress.fullName': { $regex: search, $options: 'i' } },
-        { trackingNumber: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Create query
-    let result = Order.find(queryObject);
-
-    // Sort orders
-    switch (sort) {
-      case 'oldest':
-        result = result.sort('createdAt');
-        break;
-      case 'amount-highest':
-        result = result.sort('-totalAmount');
-        break;
-      case 'amount-lowest':
-        result = result.sort('totalAmount');
-        break;
-      default:
-        result = result.sort('-createdAt');
-    }
-
-    // Setup pagination
-    const skip = (page - 1) * limit;
-    result = result.skip(skip).limit(limit);
-
-    // Execute query
-    const orders = await result.populate('userId', 'name email').exec();
-    const totalOrders = await Order.countDocuments(queryObject);
-    const numOfPages = Math.ceil(totalOrders / limit);
-
-    res.status(StatusCodes.OK).json({
-      orders,
-      totalOrders,
-      numOfPages,
-    });
-  } catch (error) {
-    console.error('Error fetching orders:', error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Failed to fetch orders",
-      error: error.message
-    });
+  // Add filters
+  if (status && status !== 'all') {
+    queryObject.status = String(status);
   }
+  if (delivery && delivery !== 'all') {
+    queryObject.deliveryStatus = String(delivery);
+  }
+  if (search) {
+    queryObject.$or = [
+      { 'shippingAddress.fullName': containsFilter(search) },
+      { trackingNumber: containsFilter(search) }
+    ];
+  }
+
+  const sortOptions = {
+    oldest: 'createdAt',
+    'amount-highest': '-totalAmount',
+    'amount-lowest': 'totalAmount',
+  };
+
+  const orders = await Order.find(queryObject)
+    .sort(sortOptions[sort] || '-createdAt')
+    .skip(skip)
+    .limit(limit)
+    .populate('userId', 'fullName email');
+  const totalOrders = await Order.countDocuments(queryObject);
+  const numOfPages = Math.ceil(totalOrders / limit);
+
+  res.status(StatusCodes.OK).json({
+    orders,
+    totalOrders,
+    numOfPages,
+  });
 };

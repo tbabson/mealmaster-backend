@@ -18,10 +18,9 @@ const CartSchema = new mongoose.Schema(
     {
         userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, unique: true }, // Ensures one cart per user
         cartItems: [MealSchema],
-        // cartTotal: { type: Number, default: 0 },
-        // shipping: { type: Number, default: 300 },
-        // tax: { type: Number, default: 0 },
-        // orderTotal: { type: Number, default: 0 }
+        // Set by the admin cart screen; previously missing from the schema, so
+        // status updates were silently dropped.
+        status: { type: String, default: 'active' },
     },
     { timestamps: true } // Automatically adds createdAt & updatedAt
 );

@@ -1,6 +1,4 @@
 import OpenAI from 'openai';
-import dotenv from 'dotenv';
-dotenv.config();
 
 // Set OPENAI_MODEL to whichever model your account has access to.
 export const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';

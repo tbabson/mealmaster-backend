@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# multer temp uploads (pushed to Cloudinary, then deleted)
+public/uploads/

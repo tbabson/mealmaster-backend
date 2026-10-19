@@ -1,58 +1,62 @@
-import cron from 'node-cron';
-import dotenv from 'dotenv';
-dotenv.config();
 import schedule from 'node-schedule';
 import Reminder from '../models/ReminderModel.js';
 import { sendEmail } from '../utils/transporter.js';
 import moment from 'moment-timezone';
 import { google } from 'googleapis';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
-import fs from 'fs';
 import webPush from 'web-push';
 import Subscription from '../models/SubscriptionModel.js';
 import User from '../models/UserSchema.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+// A reminder found overdue at boot (missed during a restart or sleep) is still
+// sent if it is at most this late; older one-off reminders are skipped and
+// recurring ones jump to their next future occurrence.
+const MISSED_REMINDER_GRACE_MS =
+  (Number(process.env.MISSED_REMINDER_GRACE_MINUTES) || 60) * 60 * 1000;
 
-// Set up token paths
-const TOKEN_DIRECTORY = path.join(__dirname, '..', 'utils', 'tokens');
-const TOKEN_PATH = path.join(TOKEN_DIRECTORY, 'google_calendar_token.json');
+// reminderId -> node-schedule Job, so updates and deletes can cancel the old job
+const jobs = new Map();
 
-// Ensure token directory exists
-if (!fs.existsSync(TOKEN_DIRECTORY)) {
-  fs.mkdirSync(TOKEN_DIRECTORY, { recursive: true });
-}
+// Everything the email, push and calendar senders read from a reminder
+const REMINDER_POPULATE = [
+  {
+    path: 'meal',
+    select: 'name image ingredients preparationSteps',
+    populate: [
+      { path: 'ingredients', select: 'name quantity unit' },
+      { path: 'preparationSteps', select: 'description skillLevel steps' },
+    ],
+  },
+  { path: 'user', select: 'email fullName' },
+];
 
 // ----- Google API Setup -----
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
 
-const loadSavedToken = async (userId) => {
-  try {
-    // Instead of reading from file, get the token from the user's record
-    const user = await User.findById(userId);
-    if (!user || !user.googleRefreshToken) {
-      throw new Error('No refresh token found for user');
-    }
-
-    oauth2Client.setCredentials({
-      refresh_token: user.googleRefreshToken
-    });
-
-    return oauth2Client;
-  } catch (err) {
-    console.error('Error loading token:', err);
-    throw err;
+// A fresh client per call: a shared module-level client with per-user
+// credentials let concurrent reminders write to the wrong user's calendar.
+const getCalendarClientForUser = async (userId) => {
+  const user = await User.findById(userId).select('+googleRefreshToken');
+  if (!user || !user.googleRefreshToken) {
+    throw new Error('No refresh token found for user');
   }
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+  oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+  return oauth2Client;
 };
 
 // ----- Helper Functions for Meal Preparation -----
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 const hasValidPreparationSteps = (meal) => {
   return meal.preparationSteps &&
@@ -63,65 +67,72 @@ const hasValidPreparationSteps = (meal) => {
     meal.preparationSteps[0].steps.length > 0;
 };
 
-const formatPreparationSteps = (meal, format = 'text') => {
+export const formatPreparationSteps = (meal) => {
   if (!hasValidPreparationSteps(meal)) {
-    return format === 'text'
-      ? 'No preparation steps provided.'
-      : '<li>No preparation steps provided.</li>';
+    return 'No preparation steps provided.';
   }
 
-  const steps = meal.preparationSteps[0].steps;
+  return meal.preparationSteps[0].steps.map(({ stepNumber, instruction, duration }) =>
+    `Step ${stepNumber}: ${instruction} (Duration: ${duration || 'N/A'})`
+  ).join('\n');
+};
 
-  if (format === 'text') {
-    return steps.map(({ stepNumber, instruction, duration }) =>
-      `Step ${stepNumber}: ${instruction} (Duration: ${duration || 'N/A'})`
-    ).join('\n');
-  } else {
-    return steps.map(({ stepNumber, instruction, duration }) => `
-            <li>
-                <strong>Step ${stepNumber}</strong>: ${instruction}
-                <span style="color: #7f8c8d; font-style: italic; margin-left: 10px;">
-                    (Duration: ${duration || 'N/A'})
-                </span>
-            </li>
-        `).join('');
-  }
+// Google Calendar event body for a reminder whose meal is populated per REMINDER_POPULATE
+export const buildCalendarEvent = (reminder) => {
+  const ingredientsList = (reminder.meal.ingredients || [])
+    .map(i => `- ${i.name}`)
+    .join('\n');
+
+  return {
+    summary: `Meal Reminder: ${reminder.meal.name}`,
+    description: `Time to prepare: ${reminder.meal.name}\n\n` +
+      `Ingredients:\n${ingredientsList}\n\n` +
+      `Steps:\n${formatPreparationSteps(reminder.meal)}`,
+    start: {
+      dateTime: moment(reminder.reminderTime).toISOString(),
+      timeZone: 'UTC'
+    },
+    end: {
+      dateTime: moment(reminder.reminderTime)
+        .add(1, 'hour')
+        .toISOString(),
+      timeZone: 'UTC'
+    },
+    reminders: {
+      useDefault: false,
+      overrides: [
+        { method: 'email', minutes: 30 },
+        { method: 'popup', minutes: 15 }
+      ]
+    },
+  };
+};
+
+export const insertCalendarEvent = async (reminder, event = buildCalendarEvent(reminder)) => {
+  const auth = await getCalendarClientForUser(reminder.user._id);
+  const calendar = google.calendar({ version: 'v3', auth });
+  const response = await calendar.events.insert({
+    calendarId: 'primary',
+    resource: event,
+    sendUpdates: 'all'
+  });
+  return response.data;
 };
 
 // ----- Notification Functions -----
 
-const sendEmailReminder = async (reminderId) => {
+const sendEmailReminder = async (reminder) => {
   try {
-    const reminder = await Reminder.findById(reminderId)
-      .populate({
-        path: 'meal',
-        select: 'name image ingredients preparationSteps',
-        populate: [
-          { path: 'ingredients', select: 'name quantity unit' },
-          {
-            path: 'preparationSteps',
-            select: 'description skillLevel steps',
-            populate: {
-              path: 'steps',
-              select: 'stepNumber instruction duration _id'
-            }
-          }
-        ]
-      })
-      .populate('user', 'email fullName');
-
-    if (!reminder) {
-      console.error(`Reminder with ID ${reminderId} not found.`);
-      return false;
-    }
-
     const { meal, user, reminderTime, timezone } = reminder;
     const tz = timezone || process.env.USER_TIMEZONE || 'Africa/Lagos';
     const formattedTime = moment(reminderTime).tz(tz).format('dddd, MMMM Do YYYY [at] h:mm A (z)');
 
     const ingredientNames = meal.ingredients.map(({ name }) => name).join(', ');
-    const textSteps = formatPreparationSteps(meal, 'text');
+    const textSteps = formatPreparationSteps(meal);
     const appUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    const mealName = escapeHtml(meal.name);
+    const userName = escapeHtml(user.fullName);
 
     // ── Ingredient rows ──────────────────────────────────────────────────────
     const ingredientRows = meal.ingredients.map(({ name, quantity, unit }) => `
@@ -131,7 +142,7 @@ const sendEmailReminder = async (reminderId) => {
             <tr>
               <td style="width:8px;height:8px;background:#28842b;border-radius:50%;vertical-align:middle;"></td>
               <td style="padding-left:10px;font-size:14px;color:#334155;font-weight:500;text-transform:capitalize;vertical-align:middle;">
-                ${name}${quantity ? `<span style="color:#94a3b8;font-weight:400;"> &mdash; ${quantity}${unit ? ' ' + unit : ''}</span>` : ''}
+                ${escapeHtml(name)}${quantity ? `<span style="color:#94a3b8;font-weight:400;"> &mdash; ${escapeHtml(quantity)}${unit ? ' ' + escapeHtml(unit) : ''}</span>` : ''}
               </td>
             </tr>
           </table>
@@ -146,11 +157,11 @@ const sendEmailReminder = async (reminderId) => {
             <table cellpadding="0" cellspacing="0" border="0" width="100%">
               <tr>
                 <td style="width:28px;vertical-align:top;padding-top:2px;">
-                  <div style="width:26px;height:26px;background:#ff5722;border-radius:50%;text-align:center;line-height:26px;font-size:11px;font-weight:800;color:#fff;">${stepNumber}</div>
+                  <div style="width:26px;height:26px;background:#ff5722;border-radius:50%;text-align:center;line-height:26px;font-size:11px;font-weight:800;color:#fff;">${escapeHtml(stepNumber)}</div>
                 </td>
                 <td style="padding-left:12px;font-size:14px;color:#334155;line-height:1.6;vertical-align:top;">
-                  ${instruction}
-                  ${duration ? `<div style="margin-top:3px;font-size:12px;color:#94a3b8;">&#9201; ${duration}</div>` : ''}
+                  ${escapeHtml(instruction)}
+                  ${duration ? `<div style="margin-top:3px;font-size:12px;color:#94a3b8;">&#9201; ${escapeHtml(duration)}</div>` : ''}
                 </td>
               </tr>
             </table>
@@ -212,7 +223,7 @@ Please do not reply to this email.`,
           ${meal.image ? `
           <tr>
             <td style="padding:0;line-height:0;">
-              <img src="${meal.image}" alt="${meal.name}" width="600"
+              <img src="${escapeHtml(meal.image)}" alt="${mealName}" width="600"
                    style="width:100%;max-width:600px;height:220px;object-fit:cover;display:block;">
             </td>
           </tr>` : ''}
@@ -221,11 +232,11 @@ Please do not reply to this email.`,
           <tr>
             <td style="padding:32px 40px 0;">
               <p style="margin:0 0 6px;font-size:12px;color:#ff5722;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;">&#9200; Time to cook!</p>
-              <h1 style="margin:0 0 14px;font-size:26px;font-weight:800;color:#143315;line-height:1.25;">${meal.name}</h1>
+              <h1 style="margin:0 0 14px;font-size:26px;font-weight:800;color:#143315;line-height:1.25;">${mealName}</h1>
               <p style="margin:0;font-size:15px;color:#475569;line-height:1.7;">
-                Hi <strong style="color:#143315;">${user.fullName}</strong> &#128075;,<br>
+                Hi <strong style="color:#143315;">${userName}</strong> &#128075;,<br>
                 Your meal reminder is here. Everything you need to prepare
-                <strong style="color:#143315;">${meal.name}</strong> is below — happy cooking!
+                <strong style="color:#143315;">${mealName}</strong> is below — happy cooking!
               </p>
             </td>
           </tr>
@@ -240,7 +251,7 @@ Please do not reply to this email.`,
                       <tr>
                         <td>
                           <p style="margin:0;font-size:11px;color:#ff5722;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;">Scheduled for</p>
-                          <p style="margin:5px 0 0;font-size:16px;font-weight:700;color:#143315;">${formattedTime}</p>
+                          <p style="margin:5px 0 0;font-size:16px;font-weight:700;color:#143315;">${escapeHtml(formattedTime)}</p>
                         </td>
                         <td align="right" style="font-size:30px;vertical-align:middle;">&#128336;</td>
                       </tr>
@@ -333,8 +344,9 @@ Please do not reply to this email.`,
 };
 
 const sendPushNotification = async (reminder) => {
+  const subscriptionId = reminder.subscription?._id || reminder.subscription;
   try {
-    const subscription = await Subscription.findById(reminder.subscription).lean();
+    const subscription = await Subscription.findById(subscriptionId).lean();
     if (!subscription) {
       console.error('No subscription found for the reminder');
       return false;
@@ -376,8 +388,8 @@ const sendPushNotification = async (reminder) => {
   } catch (error) {
     // 404/410 mean the browser threw the subscription away — stop pushing to it
     if (error.statusCode === 404 || error.statusCode === 410) {
-      console.log(`Pruning expired push subscription ${reminder.subscription}`);
-      await Subscription.findByIdAndDelete(reminder.subscription);
+      console.log(`Pruning expired push subscription ${subscriptionId}`);
+      await Subscription.findByIdAndDelete(subscriptionId);
       await Reminder.findByIdAndUpdate(reminder._id, { subscription: null });
       return false;
     }
@@ -388,48 +400,7 @@ const sendPushNotification = async (reminder) => {
 
 const syncWithCalendar = async (reminder) => {
   try {
-    const authClient = await loadSavedToken(reminder.user._id);
-    const calendar = google.calendar({ version: 'v3', auth: authClient });
-
-    const ingredientsList = reminder.meal.ingredients
-      .map(i => `- ${i.name}`)
-      .join('\n');
-
-    const stepsList = reminder.meal.preparationSteps
-      .map((step, i) => `${i + 1}. ${step.instruction}`)
-      .join('\n');
-
-    const event = {
-      summary: `Meal Reminder: ${reminder.meal.name}`,
-      description: `Time to prepare: ${reminder.meal.name}\n\n` +
-        `Ingredients:\n${ingredientsList}\n\n` +
-        `Steps:\n${stepsList}`,
-      start: {
-        dateTime: reminder.reminderTime,
-        timeZone: 'UTC'
-      },
-      end: {
-        dateTime: moment(reminder.reminderTime)
-          .add(1, 'hour')
-          .toISOString(),
-        timeZone: 'UTC'
-      },
-      reminders: {
-        useDefault: false,
-        overrides: [
-          { method: 'email', minutes: 30 },
-          { method: 'popup', minutes: 15 }
-        ]
-      }
-    };
-
-    const calendarEvent = await calendar.events.insert({
-      calendarId: 'primary',
-      resource: event,
-      sendUpdates: 'all'
-    });
-
-    // console.log(`Calendar synced for reminder ${reminder._id}: Event ID: ${calendarEvent.data.id}`);
+    await insertCalendarEvent(reminder);
     return true;
   } catch (error) {
     console.error('Error syncing with calendar:', error);
@@ -457,23 +428,39 @@ const getNextReminderTime = (currentReminderTime, frequency) => {
   return nextTime;
 };
 
-const processReminder = async (reminder) => {
+// First occurrence strictly after `after`, stepping from `from` by `frequency`
+export const nextOccurrenceAfter = (from, frequency, after = new Date()) => {
+  let next = getNextReminderTime(from, frequency);
+  while (next && next <= after) {
+    next = getNextReminderTime(next, frequency);
+  }
+  return next;
+};
+
+const processReminder = async (reminderId, scheduledFor) => {
   try {
-    reminder = await Reminder.findById(reminder._id)
-      .populate('meal')
-      .populate('subscription')
-      .populate('user')
+    // Atomically claim this occurrence. If the reminder was edited (time no
+    // longer matches), deleted, or already sent by another instance, the
+    // claim fails and this run is a no-op — no duplicate notifications.
+    const reminder = await Reminder.findOneAndUpdate(
+      { _id: reminderId, notified: false, reminderTime: scheduledFor },
+      { $set: { notified: true } },
+      { new: true }
+    )
+      .populate(REMINDER_POPULATE)
       .lean();
 
-    if (!reminder) {
-      console.error('Reminder not found when processing');
+    if (!reminder) return false;
+
+    if (!reminder.meal || !reminder.user) {
+      console.error(`Reminder ${reminderId} references a missing meal or user; skipping`);
       return false;
     }
 
     let notificationSent = false;
     switch (reminder.notificationMethod) {
       case 'email':
-        notificationSent = await sendEmailReminder(reminder._id);
+        notificationSent = await sendEmailReminder(reminder);
         break;
       case 'push':
         notificationSent = await sendPushNotification(reminder);
@@ -483,66 +470,95 @@ const processReminder = async (reminder) => {
         break;
       default:
         console.log(`Unknown notification method: ${reminder.notificationMethod}`);
-        return false;
     }
 
-    if (notificationSent) {
-      const updatedReminder = await Reminder.findById(reminder._id);
-      if (updatedReminder.isRecurring && updatedReminder.recurringFrequency) {
-        const nextReminderTime = getNextReminderTime(updatedReminder.reminderTime, updatedReminder.recurringFrequency);
-        if (nextReminderTime) {
-          updatedReminder.reminderTime = nextReminderTime;
-          updatedReminder.notified = false;
-          await updatedReminder.save();
-          scheduleIndividualReminder(updatedReminder);
-        } else {
-          updatedReminder.isRecurring = false;
-          updatedReminder.notified = true;
-          await updatedReminder.save();
-        }
-      } else {
-        updatedReminder.notified = true;
-        await updatedReminder.save();
-      }
-      return true;
+    if (!notificationSent) {
+      console.error(`Reminder ${reminderId} could not be delivered via ${reminder.notificationMethod}`);
     }
-    return false;
+
+    // Recurring reminders continue even if this one delivery failed
+    if (reminder.isRecurring && reminder.recurringFrequency) {
+      const nextReminderTime = nextOccurrenceAfter(scheduledFor, reminder.recurringFrequency);
+      if (nextReminderTime) {
+        const updated = await Reminder.findOneAndUpdate(
+          { _id: reminderId, reminderTime: scheduledFor },
+          { $set: { reminderTime: nextReminderTime, notified: false } },
+          { new: true }
+        );
+        if (updated) scheduleIndividualReminder(updated);
+      }
+    }
+
+    return notificationSent;
   } catch (error) {
     console.error('Error processing reminder:', error);
     return false;
   }
 };
 
-export const scheduleIndividualReminder = (reminder) => {
-  const utcTime = moment.utc(reminder.reminderTime).toDate();
-  const job = schedule.scheduleJob(utcTime, async () => {
-    await processReminder(reminder);
-  });
-  return job;
-};
-
-export const createReminder = async (reminderData) => {
-  const reminder = new Reminder(reminderData);
-  await reminder.save();
-  scheduleIndividualReminder(reminder);
-  return reminder;
-};
-
-export const rescheduleReminder = async (reminder) => {
-  if (reminder.job && typeof reminder.job.cancel === 'function') {
-    reminder.job.cancel();
+export const cancelReminderJob = (reminderId) => {
+  const key = String(reminderId);
+  const job = jobs.get(key);
+  if (job) {
+    job.cancel();
+    jobs.delete(key);
   }
-  scheduleIndividualReminder(reminder);
+};
+
+// (Re)schedule a reminder. Always replaces any job already registered for it,
+// so calling this after an update never leaves the old time armed.
+export const scheduleIndividualReminder = (reminder) => {
+  const key = String(reminder._id);
+  cancelReminderJob(key);
+
+  if (reminder.notified) return null;
+
+  const scheduledFor = new Date(reminder.reminderTime);
+
+  // node-schedule silently ignores dates in the past — run those now instead
+  if (scheduledFor.getTime() <= Date.now()) {
+    setImmediate(() => processReminder(key, scheduledFor));
+    return null;
+  }
+
+  const job = schedule.scheduleJob(scheduledFor, () => {
+    jobs.delete(key);
+    processReminder(key, scheduledFor);
+  });
+  if (job) jobs.set(key, job);
+  return job;
 };
 
 export const initializeReminderSystem = async () => {
   try {
     console.log('Initializing reminder system...');
     const reminders = await Reminder.find({ notified: false });
-    reminders.forEach((reminder) => {
-      scheduleIndividualReminder(reminder);
-    });
+    const now = Date.now();
+    let missed = 0;
+
+    for (const reminder of reminders) {
+      const overdueBy = now - new Date(reminder.reminderTime).getTime();
+
+      if (overdueBy <= MISSED_REMINDER_GRACE_MS) {
+        // Future, or only slightly late — schedule (late ones fire immediately)
+        scheduleIndividualReminder(reminder);
+      } else if (reminder.isRecurring && reminder.recurringFrequency) {
+        // Long overdue recurring reminder: skip the stale occurrences
+        reminder.reminderTime = nextOccurrenceAfter(reminder.reminderTime, reminder.recurringFrequency);
+        await reminder.save();
+        scheduleIndividualReminder(reminder);
+      } else {
+        // Long overdue one-off reminder: too late to be useful
+        reminder.notified = true;
+        await reminder.save();
+        missed++;
+      }
+    }
+
+    console.log(`Scheduled ${reminders.length - missed} reminder(s); skipped ${missed} missed one-off reminder(s).`);
   } catch (error) {
     console.error('Error initializing reminder system:', error.message);
   }
 };
+
+export { REMINDER_POPULATE };

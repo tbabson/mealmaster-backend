@@ -207,7 +207,13 @@ export const recommendationFingerprint = ({ profile, candidates }) => {
  * time it is ordered.
  */
 export const buildNutritionProfile = async (userId) => {
-  const orders = await Order.find({ userId }).select('cartItems').lean();
+  // Abandoned Stripe checkouts (unpaid) are not meals the customer ate
+  const orders = await Order.find({
+    userId,
+    $or: [{ paymentMethod: { $ne: 'stripe' } }, { isPaid: true }],
+  })
+    .select('cartItems')
+    .lean();
 
   // meal id -> times ordered
   const frequency = new Map();

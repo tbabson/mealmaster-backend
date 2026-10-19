@@ -1,33 +1,10 @@
-// import mongoose from 'mongoose';
-
-// const ShoppingListSchema = new mongoose.Schema({
-//     name: {
-//         type: String,
-//         required: [true, 'List name is required'],
-//     },
-//     ingredients: [{
-//         type: mongoose.Schema.Types.ObjectId,
-//         ref: 'Ingredient', // Linking ingredients to the shopping list
-//     }],
-//     meal: {
-//         type: mongoose.Schema.Types.ObjectId,
-//         ref: 'Meal', // Link the shopping list to a specific meal
-//         required: true,
-//     },
-//     user: {
-//         type: mongoose.Schema.Types.ObjectId,
-//         ref: 'User', // Assuming user authentication
-//         required: false,
-//     },
-// }, { timestamps: true });
-
-// export default mongoose.model('ShoppingList', ShoppingListSchema);
-
-
 import mongoose from 'mongoose';
 
 const ShoppingListSchema = new mongoose.Schema(
     {
+        name: {
+            type: String,
+        },
         ingredients: [
             {
                 type: mongoose.Schema.Types.ObjectId,
@@ -51,7 +28,6 @@ const ShoppingListSchema = new mongoose.Schema(
         expiresAt: {
             type: Date,
             default: () => new Date(Date.now() + 24 * 60 * 60 * 1000), // Set expiration to 24 hours from creation
-            index: { expires: '24h' }, // Automatically remove expired lists from DB
         },
         checkedOut: {
             type: Boolean,
@@ -61,7 +37,9 @@ const ShoppingListSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// Create an index to automatically delete expired shopping lists
+// TTL index: MongoDB deletes each list once its expiresAt has passed.
+// (A second field-level `expires: '24h'` index on the same key was removed —
+// it conflicted with this one and would have meant 48h.)
 ShoppingListSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export default mongoose.model('ShoppingList', ShoppingListSchema);

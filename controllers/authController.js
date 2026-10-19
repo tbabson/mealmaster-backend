@@ -4,26 +4,48 @@ import { comparePassword, hashPassword } from "../utils/passwordUtils.js"
 import { UnauthenticatedError, BadRequestError } from "../errors/customErrors.js"
 import { createJWT } from "../utils/tokenUtils.js"
 import { google } from 'googleapis'
+import { primaryClientUrl } from '../utils/clientUrl.js'
+
+const MIN_PASSWORD_LENGTH = 8
+
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0
+
+export const validatePassword = (password) => {
+  if (typeof password !== 'string' || password.length < MIN_PASSWORD_LENGTH) {
+    throw new BadRequestError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long`);
+  }
+}
 
 export const register = async (req, res) => {
-  const isFirstAccount = await User.countDocuments() === 0
-  req.body.role = isFirstAccount ? 'admin' : 'user'
+  const { fullName, email, password } = req.body
 
-  if (req.body.password.length < 8) {
-    throw new UnauthenticatedError('Password must be at least 8 characters long');
+  if (!isNonEmptyString(fullName) || !isNonEmptyString(email)) {
+    throw new BadRequestError('Please provide your full name and email')
   }
+  validatePassword(password)
 
-  const hashedPassword = await hashPassword(req.body.password)
-  req.body.password = hashedPassword
+  // Only these fields are accepted — never role, orders or Google tokens from the client
+  const isFirstAccount = await User.countDocuments() === 0
+  await User.create({
+    fullName: fullName.trim(),
+    email: email.trim(),
+    password: await hashPassword(password),
+    role: isFirstAccount ? 'admin' : 'user',
+  })
 
-  const user = await User.create(req.body)
   res.status(StatusCodes.CREATED).json({ msg: 'user created' })
 }
 
 export const login = async (req, res) => {
-  const user = await User.findOne({ email: req.body.email })
+  const { email, password } = req.body
 
-  const isValidUser = user && (await comparePassword(req.body.password, user.password))
+  if (!isNonEmptyString(email) || typeof password !== 'string') {
+    throw new UnauthenticatedError('invalid credentials')
+  }
+
+  const user = await User.findOne({ email: email.trim() })
+
+  const isValidUser = user && (await comparePassword(password, user.password))
 
   if (!isValidUser) throw new UnauthenticatedError('invalid credentials')
 
@@ -59,6 +81,10 @@ export const handleGoogleAuth = async (req, res) => {
     process.env.GOOGLE_REDIRECT_URI
   );
 
+  const clientUrl = process.env.NODE_ENV === 'production'
+    ? primaryClientUrl()
+    : 'http://localhost:5173';
+
   try {
     const { code } = req.query;
     if (!code) {
@@ -72,35 +98,25 @@ export const handleGoogleAuth = async (req, res) => {
 
     // Update user with refresh token
     const user = await User.findById(req.user.userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
     user.googleRefreshToken = tokens.refresh_token;
     user.googleCalendarSyncEnabled = true;
     user.lastGoogleCalendarSync = new Date();
     await user.save();
 
-    // Redirect back to reminder creation with absolute URL
-    const clientUrl = process.env.NODE_ENV === 'production'
-      ? process.env.CLIENT_URL
-      : 'http://localhost:5173';
-
     res.redirect(`${clientUrl}/create-reminders?calendar_auth=success`);
   } catch (error) {
     console.error('Google Calendar auth error:', error);
-    const clientUrl = process.env.NODE_ENV === 'production'
-      ? process.env.CLIENT_URL
-      : 'http://localhost:5173';
-
     res.redirect(`${clientUrl}/create-reminders?calendar_auth=failed&error=${encodeURIComponent(error.message)}`);
   }
 };
 
 export const revokeGoogleAccess = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.userId);
-    user.googleRefreshToken = null;
-    user.googleCalendarSyncEnabled = false;
-    await user.save();
-    res.status(StatusCodes.OK).json({ message: 'Google Calendar access revoked' });
-  } catch (error) {
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
-  }
+  await User.findByIdAndUpdate(req.user.userId, {
+    googleRefreshToken: null,
+    googleCalendarSyncEnabled: false,
+  });
+  res.status(StatusCodes.OK).json({ message: 'Google Calendar access revoked' });
 };

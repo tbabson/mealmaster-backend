@@ -34,7 +34,11 @@ const BlogSchema = new mongoose.Schema({
     },
     slug: {
         type: String,
+        // sparse: legacy posts without a slug must not collide on null
         unique: true,
+        sparse: true,
+        trim: true,
+        lowercase: true,
     },
     keywords: [{
         type: String,
@@ -97,13 +101,28 @@ BlogSchema.statics.findRelated = async function (blogId, limit = 3) {
         .populate('author', 'fullName');
 };
 
-// Drop any existing slug index if it exists
-BlogSchema.pre('save', async function () {
-    try {
-        await this.collection.dropIndex('slug_1');
-    } catch (error) {
-        // Index might not exist, ignore error
+export const slugify = (text) =>
+    String(text || '')
+        .toLowerCase()
+        .normalize('NFKD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+
+// Give every post a unique slug (previously the slug index was dropped on
+// every save to dodge duplicate-null errors, which disabled uniqueness entirely).
+BlogSchema.pre('validate', async function () {
+    if (this.slug && !this.isModified('slug')) return;
+
+    const base = slugify(this.slug || this.title) || 'post';
+    let candidate = base;
+    let attempt = 1;
+    while (await this.constructor.exists({ slug: candidate, _id: { $ne: this._id } })) {
+        attempt += 1;
+        candidate = `${base}-${attempt}`;
     }
+    this.slug = candidate;
 });
 
 const Blog = mongoose.model('Blog', BlogSchema);

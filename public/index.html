@@ -605,8 +605,8 @@
     <div class="body">
       <p>All fields optional. Passing a different <code>meal</code> id moves the ingredient: it is
          pulled from the old meal's array and added to the new one.</p>
-      <p class="errs">Falsy values are treated as absent, so <code>price: 0</code> and
-         <code>quantity: 0</code> leave the existing value in place.</p></div>
+      <p class="errs">Omitted (or <code>null</code>) fields keep their existing value;
+         <code>price: 0</code> and <code>quantity: 0</code> are accepted.</p></div>
   </details>
 
   <details class="ep" id="i-delete">
@@ -716,6 +716,10 @@
   <div class="note">
     Totals are not stored. The cart returns raw items; price, tax and shipping are computed at order
     time as <code>&Sigma;(price &times; quantity)</code>, plus 10% tax, plus &#8358;300 shipping.
+    Only <code>mealID</code>, ingredient <code>name</code> and <code>quantity</code> are read from
+    the client — names, images, units and prices are always taken from the catalogue.
+    <code>:userId</code> routes accept only the caller's own id (admins may use any); other ids get
+    <code>403</code>.
   </div>
 
   <details class="ep" id="c-get">
@@ -736,8 +740,9 @@
       <span class="url"><span class="b">/api/v1/cart</span><span class="p">/sync</span></span>
       <span class="role session">session</span><span class="sum">Replace the whole cart</span></summary>
     <div class="body">
-      <p>Body: <code>userId</code>*, <code>cartItems</code>*. Overwrites server state wholesale — the
-         route a client uses to push a locally-held cart up after signing in. Last write wins.</p></div>
+      <p>Body: <code>cartItems</code>*. Overwrites the caller's cart wholesale — the route a client
+         uses to push a locally-held cart up after signing in. Last write wins. Meals or ingredients
+         that no longer exist in the catalogue are dropped; prices are re-read from the catalogue.</p></div>
   </details>
 
   <details class="ep" id="c-add">
@@ -745,11 +750,12 @@
       <span class="url"><span class="b">/api/v1/cart</span><span class="p">/add</span></span>
       <span class="role session">session</span><span class="sum">Add or merge one meal</span></summary>
     <div class="body">
-      <p>Body: <code>userId</code>*, <code>meal</code>*. If the meal is already in the cart its
-         ingredients are merged and matching quantities are summed; otherwise the meal is appended.</p>
+      <p>Body: <code>meal</code>*. Added to the caller's cart. If the meal is already in the cart its
+         ingredients are merged and matching quantities are summed; otherwise the meal is appended.
+         <code>400</code> for an unknown meal or ingredient.</p>
       <h5>Request</h5>
-<pre>{ "userId": "…", "meal": { "mealID": "…", "name": "Jollof Rice", "image": "https://…",
-    "ingredients": [ { "name": "Rice", "quantity": 1, "price": 1200, "unit": "g" } ] } }</pre></div>
+<pre>{ "meal": { "mealID": "…",
+    "ingredients": [ { "name": "Rice", "quantity": 1 } ] } }</pre></div>
   </details>
 
   <details class="ep" id="c-qty">
@@ -840,17 +846,17 @@
       <span class="url"><span class="b">/api/v1/orders</span><span class="p">/place</span></span>
       <span class="role session">session</span><span class="sum">Check out the cart</span></summary>
     <div class="body">
-      <p>Body: <code>userId</code>*, <code>shippingAddress</code>*, <code>paymentMethod</code>*,
-         <code>transactionId</code>. Items and totals come from the stored cart, not the request — the
-         client cannot set its own price. The cart is emptied on success and a tracking number is
-         generated.</p>
+      <p>Body: <code>shippingAddress</code>*, <code>paymentMethod</code>*,
+         <code>transactionId</code>. Always places the caller's own order. Items come from the stored
+         cart and are repriced from the catalogue — the client cannot set its own price. The cart is
+         emptied on success and a tracking number is generated.</p>
       <h5>Request</h5>
-<pre>{ "userId": "…", "paymentMethod": "bankTransfer",
+<pre>{ "paymentMethod": "bankTransfer",
   "shippingAddress": { "fullName": "Jane Doe", "address": "12 Marina Rd", "city": "Lagos",
                        "postalCode": "101241", "country": "Nigeria", "phone": "+234…" } }</pre>
       <h5>201</h5>
 <pre>{ "_id": "…", "totalAmount": 15300, "taxPrice": 1200, "shippingPrice": 300,
-  "status": "Pending", "deliveryStatus": "Scheduled", "trackingNumber": "TRACK48210",
+  "status": "Pending", "deliveryStatus": "Scheduled", "trackingNumber": "TRACK9F3A61C2B0",
   "isPaid": false, "cartItems": [ … ] }</pre>
       <p class="errs"><b>Errors:</b> <code>400</code> when a required field is missing or the cart is
          empty.</p></div>
@@ -861,9 +867,24 @@
       <span class="url"><span class="b">/api/v1/orders</span><span class="p">/user/:userId</span></span>
       <span class="role session">session</span><span class="sum">A user's order history</span></summary>
     <div class="body">
-      <p>Newest first.</p>
+      <p>Newest first. <code>:userId</code> must be the caller (admins may use any); otherwise
+         <code>403</code>.</p>
       <h5>200</h5>
 <pre>{ "orders": [ … ] }</pre></div>
+  </details>
+
+  <details class="ep" id="o-session">
+    <summary><span class="m get">GET</span>
+      <span class="url"><span class="b">/api/v1/orders</span><span class="p">/by-session/:sessionId</span></span>
+      <span class="role session">session</span><span class="sum">Order for a Stripe Checkout session</span></summary>
+    <div class="body">
+      <p>Used by the order-success page after Stripe redirects back with
+         <code>?session_id=…</code>. Owner or admin only. The webhook may land a moment after the
+         redirect, so check <code>isPaid</code> rather than assuming payment.</p>
+      <h5>200</h5>
+<pre>{ "order": { "_id": "…", "totalAmount": 15300, "isPaid": true, … } }</pre>
+      <p class="errs"><b>Errors:</b> <code>404</code> when no Stripe order for that session belongs
+         to the caller.</p></div>
   </details>
 
   <details class="ep" id="o-get">
@@ -1408,15 +1429,15 @@
       <span class="url"><span class="b">/api/v1/payment</span><span class="p">/create-stripe-session</span></span>
       <span class="role session">session</span><span class="sum">Start Checkout</span></summary>
     <div class="body">
-      <p>Body: <code>cartItems</code>*, <code>shippingAddress</code>*, <code>userId</code>*,
-         <code>totalAmount</code>. Writes an unpaid order first, then opens a Checkout session carrying
-         that order id in its metadata. One line item per meal, priced in kobo, plus a shipping line.</p>
+      <p>Body: <code>cartItems</code>*, <code>shippingAddress</code>*. Writes an unpaid order for the
+         caller first, then opens a Checkout session carrying that order id in its metadata. Prices
+         come from the catalogue, never the request. One line item per meal, priced in kobo, plus tax
+         (10%) and shipping lines, so the charge equals the order's <code>totalAmount</code>.</p>
       <h5>200</h5>
 <pre>{ "sessionId": "cs_test_a1B2…" }</pre>
       <p class="errs">Redirect the browser to Stripe with this id. Success returns to
-         <code>CLIENT_URL/order-success</code>, cancel to <code>CLIENT_URL/checkout</code>. Note the
-         amount is taken from the request, so it should be validated against the cart server-side before
-         this is trusted in production.</p></div>
+         <code>CLIENT_URL/order-success</code>, cancel to <code>CLIENT_URL/checkout</code>.
+         <code>400</code> for an unknown meal/ingredient or an invalid quantity.</p></div>
   </details>
 
   <details class="ep" id="pay-bank">
@@ -1424,9 +1445,8 @@
       <span class="url"><span class="b">/api/v1/payment</span><span class="p">/orders/place</span></span>
       <span class="role session">session</span><span class="sum">Order by bank transfer</span></summary>
     <div class="body">
-      <p>Body: <code>cartItems</code>*, <code>shippingAddress</code>*, <code>paymentMethod</code>,
-         <code>taxPrice</code>, <code>shippingPrice</code>, <code>totalAmount</code>,
-         <code>transactionId</code>. Saved with <code>isPaid: false</code> and a payment result of
+      <p>Body: <code>cartItems</code>*, <code>shippingAddress</code>*, <code>transactionId</code>.
+         Totals are computed server-side from catalogue prices. Saved with <code>isPaid: false</code> and a payment result of
          <code>pending</code>; a reference of the form <code>BT-&lt;timestamp&gt;</code> is generated if
          none is supplied.</p>
       <h5>201</h5>

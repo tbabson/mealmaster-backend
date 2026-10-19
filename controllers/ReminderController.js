@@ -1,61 +1,64 @@
 import Reminder from '../models/ReminderModel.js';
 import Subscription from '../models/SubscriptionModel.js';
 import { StatusCodes } from 'http-status-codes';
-import Meal from '../models/MealModel.js'; // Assuming a Meal model exists
-import { scheduleIndividualReminder } from './ScheduleReminders.js';
-import { google } from 'googleapis';
+import Meal from '../models/MealModel.js';
+import {
+    scheduleIndividualReminder,
+    cancelReminderJob,
+    buildCalendarEvent,
+    insertCalendarEvent,
+    REMINDER_POPULATE,
+} from './ScheduleReminders.js';
 import moment from 'moment-timezone';
 import webPush from 'web-push';
-import dotenv from 'dotenv';
-dotenv.config();
+import { BadRequestError, NotFoundError } from '../errors/customErrors.js';
+import { ownerFilter } from '../middleware/authMiddleware.js';
 
-// VAPID key configuration
-const vapidKeys = {
-    publicKey: process.env.VAPID_PUBLIC_KEY,
-    privateKey: process.env.VAPID_PRIVATE_KEY
+// VAPID key configuration — skipped (with a warning) rather than crashing the
+// whole server at import time when the keys are not configured.
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webPush.setVapidDetails(
+        process.env.VAPID_SUBJECT || 'mailto:babatunde.taiwoadekunle@gmail.com',
+        process.env.VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+    );
+} else {
+    console.warn('VAPID keys are not set — push notifications are disabled.');
+}
+
+const findOwnReminder = async (req) => {
+    const reminder = await Reminder.findOne({ _id: req.params.id, ...ownerFilter(req) });
+    if (!reminder) throw new NotFoundError('Reminder not found');
+    return reminder;
 };
 
-webPush.setVapidDetails(
-    'mailto:babatunde.taiwoadekunle@gmail.com',
-    vapidKeys.publicKey,
-    vapidKeys.privateKey
-);
+const upsertSubscription = ({ endpoint, keys }, userId) =>
+    Subscription.findOneAndUpdate(
+        { endpoint },
+        {
+            endpoint,
+            keys: {
+                p256dh: keys.p256dh,
+                auth: keys.auth,
+            },
+            user: userId,
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+
+const isValidSubscription = (s) =>
+    s && typeof s.endpoint === 'string' && s.keys && s.keys.p256dh && s.keys.auth;
 
 // Save the push subscription in the database
-
 export const savePushSubscription = async (req, res) => {
-    // console.log('Received Subscription Data:', req.body);
-    const { endpoint, keys } = req.body;
-    const userId = req.user.userId; // Extract user ID from authenticated request
-
-    // Validate subscription data
-    if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
-        console.error('Invalid subscription data:', { endpoint, keys });
-        return res.status(StatusCodes.BAD_REQUEST).json({
-            message: 'Invalid subscription data. Ensure endpoint, keys.p256dh, and keys.auth are provided.'
-        });
+    if (!isValidSubscription(req.body)) {
+        throw new BadRequestError('Invalid subscription data. Ensure endpoint, keys.p256dh, and keys.auth are provided.');
     }
 
-    try {
-        // Upsert on endpoint — a browser re-subscribing must not leave a stale row behind
-        const subscription = await Subscription.findOneAndUpdate(
-            { endpoint },
-            {
-                endpoint,
-                keys: {
-                    p256dh: keys.p256dh,
-                    auth: keys.auth,
-                },
-                user: userId,
-            },
-            { new: true, upsert: true, setDefaultsOnInsert: true }
-        );
+    // Upsert on endpoint — a browser re-subscribing must not leave a stale row behind
+    const subscription = await upsertSubscription(req.body, req.user.userId);
 
-        res.status(StatusCodes.CREATED).json({ message: 'Push subscription saved successfully', subscription });
-    } catch (error) {
-        console.error('Error saving subscription:', error); // Log the error details
-        res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: 'Failed to save subscription' });
-    }
+    res.status(StatusCodes.CREATED).json({ message: 'Push subscription saved successfully', subscription });
 };
 
 // @desc    Create a new meal reminder
@@ -73,231 +76,148 @@ export const createReminder = async (req, res) => {
     } = req.body;
     const userId = req.user.userId;
 
-    try {
-        // Validate or fetch the provided meal
-        const meal = await Meal.findById(mealId);
-        if (!meal) {
-            return res
-                .status(StatusCodes.BAD_REQUEST)
-                .json({ message: 'Invalid meal ID provided' });
-        }
-
-        // Only validate subscription for push notifications
-        let savedSubscription = null;
-        if (notificationMethod === 'push') {
-            if (!subscription || !subscription.endpoint || !subscription.keys) {
-                return res.status(StatusCodes.BAD_REQUEST).json({
-                    message: 'A valid push subscription is required to create a reminder with push notifications.'
-                });
-            }
-
-            // Reuse the row for this endpoint rather than adding one per reminder
-            savedSubscription = await Subscription.findOneAndUpdate(
-                { endpoint: subscription.endpoint },
-                {
-                    endpoint: subscription.endpoint,
-                    keys: {
-                        p256dh: subscription.keys.p256dh,
-                        auth: subscription.keys.auth
-                    },
-                    user: userId
-                },
-                { new: true, upsert: true, setDefaultsOnInsert: true }
-            );
-        }
-
-        const utcReminderTime = moment(reminderTime).utc().toISOString();
-
-        const reminder = await Reminder.create({
-            user: userId,
-            meal: meal._id,
-            reminderTime: utcReminderTime,
-            notificationMethod,
-            isRecurring,
-            recurringFrequency,
-            subscription: savedSubscription ? savedSubscription._id : null,
-            note,
-            timezone: timezone || 'Africa/Lagos',
-        });
-
-        scheduleIndividualReminder(reminder);
-        res.status(StatusCodes.CREATED).json({ reminder });
-    } catch (error) {
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
+    const meal = await Meal.findById(mealId);
+    if (!meal) {
+        throw new BadRequestError('Invalid meal ID provided');
     }
+
+    if (!reminderTime || !moment(reminderTime).isValid()) {
+        throw new BadRequestError('A valid reminder time is required');
+    }
+
+    // Only validate subscription for push notifications
+    let savedSubscription = null;
+    if (notificationMethod === 'push') {
+        if (!isValidSubscription(subscription)) {
+            throw new BadRequestError('A valid push subscription is required to create a reminder with push notifications.');
+        }
+
+        // Reuse the row for this endpoint rather than adding one per reminder
+        savedSubscription = await upsertSubscription(subscription, userId);
+    }
+
+    const reminder = await Reminder.create({
+        user: userId,
+        meal: meal._id,
+        reminderTime: moment(reminderTime).utc().toDate(),
+        notificationMethod,
+        isRecurring,
+        recurringFrequency,
+        subscription: savedSubscription ? savedSubscription._id : null,
+        note,
+        timezone: timezone || 'Africa/Lagos',
+    });
+
+    scheduleIndividualReminder(reminder);
+    res.status(StatusCodes.CREATED).json({ reminder });
 };
 
 // @desc    Get a specific user's reminders
 // @route   GET /api/reminders/user
 export const getSingleUserReminders = async (req, res) => {
-    const userId = req.user.userId; // Assuming the user is authenticated and userId is available
-
-    try {
-        // Fetch the reminders for the authenticated user
-        const reminders = await Reminder.find({ user: userId }).populate('meal');
-        if (!reminders.length) {
-            return res.status(StatusCodes.NOT_FOUND).json({ message: 'No reminders found for this user' });
-        }
-        res.status(StatusCodes.OK).json({ reminders, count: reminders.length });
-    } catch (error) {
-        res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
+    const reminders = await Reminder.find({ user: req.user.userId }).populate('meal');
+    if (!reminders.length) {
+        return res.status(StatusCodes.NOT_FOUND).json({ message: 'No reminders found for this user' });
     }
+    res.status(StatusCodes.OK).json({ reminders, count: reminders.length });
 };
 
 // @desc Send push notification
 // @route POST /api/reminders/send-push/:id
 export const sendPushNotification = async (req, res) => {
     const { id } = req.params;
-    let reminder = null; // hoisted so the catch can prune the dead subscription
+
+    const reminder = await Reminder.findOne({ _id: id, ...ownerFilter(req) })
+        .populate(REMINDER_POPULATE)
+        .populate('subscription');
+    if (!reminder) {
+        throw new NotFoundError('Reminder not found');
+    }
+
+    if (!reminder.subscription || !reminder.subscription.endpoint) {
+        throw new BadRequestError('No push subscription found for the user');
+    }
+
+    const subscription = {
+        endpoint: reminder.subscription.endpoint,
+        keys: {
+            p256dh: reminder.subscription.keys.p256dh,
+            auth: reminder.subscription.keys.auth
+        }
+    };
+
+    const payload = JSON.stringify({
+        title: `Meal Reminder: ${reminder.meal.name}`,
+        body: `Hello ${reminder.user.fullName}, it's time to prepare your meal: ${reminder.meal.name}. Ingredients: ${reminder.meal.ingredients.map(ingredient => ingredient.name).join(', ')}.`,
+        icon: reminder.meal.image || '/icons/icon-192.png',
+        badge: '/icons/badge-72.png',
+        data: { url: `/meals/${reminder.meal._id}` },
+    });
 
     try {
-        // `subscription` must be populated too — it is a ref, so without this
-        // reminder.subscription.endpoint is always undefined
-        reminder = await Reminder.findById(id).populate('user meal subscription');
-        if (!reminder) {
-            return res.status(StatusCodes.NOT_FOUND).json({ message: 'Reminder not found' });
-        }
-
-        // Check if push subscription exists in the reminder object
-        if (!reminder.subscription || !reminder.subscription.endpoint) {
-            return res.status(StatusCodes.BAD_REQUEST).json({ message: 'No push subscription found for the user' });
-        }
-
-        // Extract subscription details from the reminder
-        const subscription = {
-            endpoint: reminder.subscription.endpoint,
-            keys: {
-                p256dh: reminder.subscription.keys.p256dh,
-                auth: reminder.subscription.keys.auth
-            }
-        };
-
-        // Create the notification payload
-        const payload = JSON.stringify({
-            title: `Meal Reminder: ${reminder.meal.name}`,
-            body: `Hello ${reminder.user.fullName}, it's time to prepare your meal: ${reminder.meal.name}. Ingredients: ${reminder.meal.ingredients.map(ingredient => ingredient.name).join(', ')}.`,
-            icon: reminder.meal.image || '/icons/icon-192.png',
-            badge: '/icons/badge-72.png',
-            data: { url: `/meals/${reminder.meal._id}` },
-        });
-
-        // Send the push notification
         await webPush.sendNotification(subscription, payload);
         res.status(StatusCodes.OK).json({ message: 'Push notification sent successfully' });
     } catch (error) {
         // The browser discarded this subscription — drop it instead of retrying forever
-        if ((error.statusCode === 404 || error.statusCode === 410) && reminder?.subscription) {
+        if (error.statusCode === 404 || error.statusCode === 410) {
             await Subscription.findByIdAndDelete(reminder.subscription._id);
             await Reminder.findByIdAndUpdate(id, { subscription: null });
             return res.status(StatusCodes.GONE).json({
                 message: 'This push subscription has expired. Re-enable notifications on that device.'
             });
         }
-        res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
+        throw error;
     }
 };
 
 // @desc    Sync reminder with Google Calendar
 // @route   POST /api/reminders/calendar-sync/:id
 export const syncWithCalendar = async (req, res) => {
-    const { id } = req.params;
+    const reminder = await Reminder.findOne({ _id: req.params.id, ...ownerFilter(req) })
+        .populate(REMINDER_POPULATE);
+
+    if (!reminder) {
+        throw new NotFoundError('Reminder not found');
+    }
 
     try {
-        const reminder = await Reminder.findById(id)
-            .populate('user', 'email fullName')
-            .populate('meal', 'name ingredients preparationSteps');
-
-        if (!reminder) {
-            return res.status(StatusCodes.NOT_FOUND)
-                .json({ message: 'Reminder not found' });
-        }
-
-        // Get the authenticated Google Calendar client from middleware
-        const calendar = google.calendar({ version: 'v3', auth: req.googleAuth });
-
-        // Format ingredients and steps for the description
-        const ingredientsList = reminder.meal.ingredients
-            .map(i => `- ${i.name}`)
-            .join('\n');
-
-        const stepsList = reminder.meal.preparationSteps
-            .map((step, i) => `${i + 1}. ${step.instruction}`)
-            .join('\n');
-
-        // Prepare event details with all meal information
         const event = {
-            summary: `Meal Reminder: ${reminder.meal.name}`,
-            description: `Time to prepare: ${reminder.meal.name}\n\n` +
-                `Ingredients:\n${ingredientsList}\n\n` +
-                `Steps:\n${stepsList}`,
-            start: {
-                dateTime: reminder.reminderTime,
-                timeZone: 'UTC'
-            },
-            end: {
-                dateTime: moment(reminder.reminderTime)
-                    .add(1, 'hour')
-                    .toISOString(),
-                timeZone: 'UTC'
-            },
-            reminders: {
-                useDefault: false,
-                overrides: [
-                    { method: 'email', minutes: 30 },
-                    { method: 'popup', minutes: 15 }
-                ]
-            },
-            attendees: [{ email: reminder.user.email }]
+            ...buildCalendarEvent(reminder),
+            attendees: [{ email: reminder.user.email }],
         };
+        const created = await insertCalendarEvent(reminder, event);
 
-        // Insert the event
-        const response = await calendar.events.insert({
-            calendarId: 'primary',
-            resource: event,
-            sendUpdates: 'all'
-        });
-
-        // Update reminder with calendar event ID
-        reminder.calendarEventId = response.data.id;
+        reminder.calendarEventId = created.id;
+        reminder.calendarEventLink = created.htmlLink;
+        reminder.calendarSyncStatus = 'synced';
+        reminder.lastSyncedAt = new Date();
         await reminder.save();
 
         res.status(StatusCodes.OK).json({
             message: 'Successfully synced with Google Calendar',
-            eventLink: response.data.htmlLink,
+            eventLink: created.htmlLink,
             reminder
         });
-
     } catch (error) {
         console.error('Calendar sync error:', error);
-        res.status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({
-                message: 'Failed to sync with Google Calendar',
-                error: error.message || 'Unknown error occurred'
-            });
+        await Reminder.findByIdAndUpdate(reminder._id, { calendarSyncStatus: 'failed' });
+        res.status(StatusCodes.BAD_GATEWAY).json({ message: 'Failed to sync with Google Calendar' });
     }
 };
 
-// @desc    Get user reminders
+// @desc    All reminders (admin)
 // @route   GET /api/reminders
 export const getUserReminders = async (req, res) => {
-    const userId = req.user.userId;
-
-    try {
-        const reminders = await Reminder.find({ user: userId }).populate('meal');
-        res.status(StatusCodes.OK).json({ reminders, count: reminders.length });
-    } catch (error) {
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
-    }
+    const reminders = await Reminder.find({})
+        .populate('meal')
+        .populate('user', 'fullName email')
+        .sort({ reminderTime: 1 });
+    res.status(StatusCodes.OK).json({ reminders, count: reminders.length });
 };
 
 // @desc    Update reminder
-// @route   PUT /api/reminders/:id
+// @route   PATCH /api/reminders/:id
 export const updateReminder = async (req, res) => {
-    const { id } = req.params;
     const {
         reminderTime,
         notificationMethod,
@@ -306,55 +226,38 @@ export const updateReminder = async (req, res) => {
         note,
     } = req.body;
 
-    try {
-        const reminder = await Reminder.findById(id);
-        if (!reminder) {
-            return res
-                .status(StatusCodes.NOT_FOUND)
-                .json({ message: 'Reminder not found' });
+    const reminder = await findOwnReminder(req);
+
+    if (reminderTime) {
+        if (!moment(reminderTime).isValid()) {
+            throw new BadRequestError('A valid reminder time is required');
         }
-
-        reminder.reminderTime = reminderTime || reminder.reminderTime;
-        reminder.notificationMethod =
-            notificationMethod || reminder.notificationMethod;
-        reminder.isRecurring =
-            isRecurring !== undefined ? isRecurring : reminder.isRecurring;
-        reminder.recurringFrequency =
-            recurringFrequency || reminder.recurringFrequency;
-        reminder.note = note !== undefined ? note : reminder.note;
-        //reminder.healthGoals = healthGoals || reminder.healthGoals;
-
-        await reminder.save();
-
-        // Populate meal so the frontend keeps the full meal object (not just an ID)
-        await reminder.populate('meal');
-
-        // Reschedule so the notification fires at the updated time
-        scheduleIndividualReminder(reminder);
-
-        res.status(StatusCodes.OK).json({ reminder });
-    } catch (error) {
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
+        reminder.reminderTime = moment(reminderTime).utc().toDate();
+        // A new time means a new, unsent occurrence
+        reminder.notified = false;
     }
+    reminder.notificationMethod = notificationMethod || reminder.notificationMethod;
+    reminder.isRecurring = isRecurring !== undefined ? isRecurring : reminder.isRecurring;
+    reminder.recurringFrequency = recurringFrequency || reminder.recurringFrequency;
+    reminder.note = note !== undefined ? note : reminder.note;
+
+    await reminder.save();
+
+    // Populate meal so the frontend keeps the full meal object (not just an ID)
+    await reminder.populate('meal');
+
+    // Replaces the previously scheduled job, so the old time no longer fires
+    scheduleIndividualReminder(reminder);
+
+    res.status(StatusCodes.OK).json({ reminder });
 };
 
 // @desc    Delete reminder
-// @route   DELETE /api/reminders/:id  
+// @route   DELETE /api/reminders/:id
 export const deleteReminder = async (req, res) => {
-    const { id } = req.params;
+    const reminder = await findOwnReminder(req);
 
-    try {
-        const reminder = await Reminder.findById(id);
-        if (!reminder) {
-            return res.status(StatusCodes.NOT_FOUND).json({ message: 'Reminder not found' });
-        }
-
-        await reminder.deleteOne();
-        res.status(StatusCodes.OK).json({ message: 'Reminder deleted successfully' });
-    } catch (error) {
-        res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
-    }
+    cancelReminderJob(reminder._id);
+    await reminder.deleteOne();
+    res.status(StatusCodes.OK).json({ message: 'Reminder deleted successfully' });
 };
-

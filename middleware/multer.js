@@ -1,47 +1,43 @@
-import multer from "multer"; // Middleware to handle file uploads
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import multer from 'multer';
+import { fileURLToPath } from 'url';
+import { BadRequestError } from '../errors/customErrors.js';
 
+// Temp storage only — every upload is pushed to Cloudinary and then deleted.
+const UPLOAD_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'uploads');
 
-// const storage = multer.diskStorage({
-//     filename: (req, file, cb) => {
-//         cb(null, `${Date.now()}-${file.originalname}`);
-//     },
-// });
+// multer does not create the directory when `destination` is a function, and
+// the folder is not in git, so make sure it exists on a fresh deploy.
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+const ALLOWED_TYPES = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+};
 
-// const upload = multer({ storage });
-
-
-//Multer storage configuration
 const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'public/uploads'); // Define upload directory
-    },
+    destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+    // Never use the client's filename on disk
     filename: (req, file, cb) => {
-        const fileName = `${Date.now()}-${file.originalname}`
-        // Define unique filename using timestamp and original name
-        cb(null, fileName);
+        cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ALLOWED_TYPES[file.mimetype]}`);
     },
 });
 
-// File type validation filter
 const fileFilter = (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (!allowedTypes.includes(file.mimetype)) {
-        return cb(new Error('Only JPEG, JPG, PNG, and WEBP files are allowed'), false);
+    if (!ALLOWED_TYPES[file.mimetype]) {
+        return cb(new BadRequestError('Only JPEG, JPG, PNG, and WEBP files are allowed'), false);
     }
-    cb(null, true); // Accept file
+    cb(null, true);
 };
 
-
-
-
-// Initialize Multer with the storage configuration
 const upload = multer({
     storage,
     fileFilter,
-    limits: { fileSize: 1080 * 1080 }, // Optional: Set file size limit (5 MB in this case)
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
 });
-
-
 
 export default upload;

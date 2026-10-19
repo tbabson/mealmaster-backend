@@ -38,10 +38,19 @@ const UserSchema = new mongoose.Schema({
     enum: ['user', 'admin'],
     default: 'user',
   },
+  profileImage: {
+    type: String,
+  },
+  cloudinaryId: {
+    type: String,
+  },
   // Google Calendar Authentication fields
+  // select:false — a long-lived credential; only load it explicitly with
+  // .select('+googleRefreshToken') where a Google client is built.
   googleRefreshToken: {
     type: String,
     sparse: true,
+    select: false,
   },
   googleCalendarSyncEnabled: {
     type: Boolean,
@@ -56,6 +65,7 @@ const UserSchema = new mongoose.Schema({
 UserSchema.methods.toJSON = function () {
   let obj = this.toObject()
   delete obj.password
+  delete obj.googleRefreshToken
   return obj
 }
 

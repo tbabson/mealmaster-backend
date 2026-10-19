@@ -1,6 +1,5 @@
 import { Router } from 'express';
 const router = Router();
-//import multer from "multer"; // Middleware to handle file uploads
 import upload from '../middleware/multer.js';
 import {
   createMeal,
@@ -14,34 +13,17 @@ import {
   authorizePermissions,
 } from '../middleware/authMiddleware.js';
 
-// Routes
+// Auth runs before multer, so anonymous requests never write files to disk.
+const adminOnly = [authenticateUser, authorizePermissions('admin')];
 
-router.post(
-  '/',
-  upload.single('image'),
-  authenticateUser,
-  authorizePermissions('admin'),
-  createMeal
-);
-// Create a meal with image upload
+router.post('/', ...adminOnly, upload.single('image'), createMeal); // Create a meal with image upload
 
 router.get('/', getAllMeals); // Get all meals
 
 router.get('/:id', getMealById); // Get meal by ID
 
-router.patch(
-  '/:id',
-  upload.single('image'),
-  authenticateUser,
-  authorizePermissions('admin'),
-  updateMeal
-); // Update meal with image upload
+router.patch('/:id', ...adminOnly, upload.single('image'), updateMeal); // Update meal with image upload
 
-router.delete(
-  '/:id',
-  authenticateUser,
-  authorizePermissions('admin'),
-  deleteMeal
-); // Delete meal
+router.delete('/:id', ...adminOnly, deleteMeal); // Delete meal
 
 export default router;

@@ -1,6 +1,5 @@
 import mongoose from 'mongoose';
 import { MEAL, DIETARY } from "../utils/constants.js"
-import _default from "http-status-codes";
 
 // Estimated nutrition for one serving, derived from the meal's ingredient list.
 // An approximation for guidance — not a lab analysis, and not medical advice.
@@ -99,9 +98,15 @@ MealSchema.virtual('reviews', {
   // match: { rating: 5 },
 })
 
-MealSchema.pre('deleteOne', { document: false, query: true }, async function () {
-  const mealId = this.getFilter()._id;
-  await mongoose.model('Review').deleteMany({ meal: mealId });
+// Cascade when a meal document is deleted (the controller calls meal.deleteOne()).
+// This used to be a query-only hook, so it never ran and left orphans behind.
+MealSchema.pre('deleteOne', { document: true, query: false }, async function () {
+  const mealId = this._id;
+  await Promise.all([
+    mongoose.model('Review').deleteMany({ meal: mealId }),
+    mongoose.model('Ingredient').deleteMany({ meal: mealId }),
+    mongoose.model('PreparationSteps').deleteMany({ meal: mealId }),
+  ]);
 });
 
 export default mongoose.model('Meal', MealSchema);

@@ -1,8 +1,8 @@
 //PACKAGE IMPORTS
-import * as dotenv from 'dotenv';
-dotenv.config();
+// Must be the first import: ES module imports are hoisted, so a dotenv.config()
+// call in this file's body would run only after every other module had loaded.
+import 'dotenv/config';
 import dns from 'dns';
-dns.setServers(['8.8.8.8', '8.8.4.4']);
 import express from 'express';
 const app = express();
 import 'express-async-errors';
@@ -11,10 +11,13 @@ import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 import cloudinary from 'cloudinary';
 import helmet from 'helmet';
+import mongoSanitize from 'express-mongo-sanitize';
+import rateLimiter from 'express-rate-limit';
 import { initializeReminderSystem } from './controllers/ScheduleReminders.js';
 import cors from 'cors';
 import { validateGoogleConfig } from './utils/configValidation.js';
 import { generateSitemap } from './utils/sitemapGenerator.js';
+import { allowedOrigins } from './utils/clientUrl.js';
 
 //CUSTOM IMPORTS
 //routers
@@ -42,6 +45,15 @@ import errorHandlerMiddleware from './middleware/errorHandlerMiddleware.js';
 
 import { handleStripeWebhook } from './controllers/paymentControllers.js';
 
+// Some local networks cannot resolve MongoDB Atlas SRV records, so development
+// defaults to Google DNS. Production keeps the host's resolver unless
+// DNS_SERVERS (comma-separated) is set explicitly.
+const dnsServers = process.env.DNS_SERVERS
+  ?? (process.env.NODE_ENV === 'production' ? '' : '8.8.8.8,8.8.4.4');
+if (dnsServers) {
+  dns.setServers(dnsServers.split(',').map((s) => s.trim()).filter(Boolean));
+}
+
 // Validate required configurations
 try {
   validateGoogleConfig();
@@ -57,6 +69,12 @@ cloudinary.config({
 });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Render (and most PaaS) sit behind one reverse proxy. Without this every
+// request appears to come from the proxy's IP — all users would share one
+// rate-limit bucket — and req.protocol reports http instead of https.
+app.set('trust proxy', 1);
+
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
@@ -64,10 +82,14 @@ if (process.env.NODE_ENV === 'development') {
 // Frontend served separately on Render Static Site
 
 // Updated CORS configuration
+// CLIENT_URL may list several origins (comma-separated); see utils/clientUrl.js.
+// With a list, cors echoes back whichever origin matched and sets Vary: Origin.
+const corsOrigins = allowedOrigins();
+if (process.env.NODE_ENV === 'production' && !corsOrigins.length) {
+  console.warn('CLIENT_URL is not set — browsers will be blocked by CORS.');
+}
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production'
-    ? process.env.CLIENT_URL
-    : ['http://localhost:5173', 'http://localhost:5000'],
+  origin: corsOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -81,17 +103,31 @@ app.post('/api/v1/payment/webhook',
 );
 
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+// Strip `$` / `.` keys from body, query and params so request data cannot
+// smuggle MongoDB operators (e.g. {"email": {"$ne": null}}) into queries.
+app.use(mongoSanitize());
 app.use(
-  helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'self'"],
-      imgSrc: ["'self'", "https://res.cloudinary.com"],
-      // you might need to include other sources too
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", "https://res.cloudinary.com"],
+        // you might need to include other sources too
+      },
     },
   })
 );
+
+// Broad per-IP ceiling for the whole API; auth and AI routes have tighter limits.
+app.use('/api/v1', rateLimiter({
+  windowMs: 15 * 60 * 1000,
+  limit: 500,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { msg: 'Too many requests, please try again later', message: 'Too many requests, please try again later' },
+}));
 
 // Sitemap endpoint
 app.get('/sitemap.xml', async (req, res) => {
@@ -105,11 +141,6 @@ app.get('/sitemap.xml', async (req, res) => {
     res.status(500).send('Error generating sitemap');
   }
 });
-
-
-// app.get('/', (req, res) => {
-//   res.send('hello world');
-// });
 
 app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/meals', mealRouter);
@@ -144,11 +175,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('*', (req, res) => {
-  res.status(404).json({ msg: 'Route not found' });
+// Any method, not just GET
+app.use((req, res) => {
+  res.status(404).json({ msg: 'Route not found', message: 'Route not found' });
 });
-
-
 
 app.use(errorHandlerMiddleware);
 

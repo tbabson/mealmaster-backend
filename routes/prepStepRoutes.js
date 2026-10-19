@@ -13,19 +13,15 @@ import {
     authorizePermissions,
 } from '../middleware/authMiddleware.js';
 
+const adminOnly = [authenticateUser, authorizePermissions('admin')];
 
 // Routes
-router.post('/', authenticateUser,
-    authorizePermissions('admin'), createPreparationStep); // Create a new preparation step
-router.get('/', authenticateUser,
-    authorizePermissions('admin'), getPreparationSteps); // Get all preparation steps (with optional skill level filter)
-router.get('/:id', authenticateUser,
-    authorizePermissions('admin'), getPreparationStepById); // Get a single preparation step by ID
-router.patch('/:id', authenticateUser,
-    authorizePermissions('admin'), updatePreparationStep); // Update a preparation step
-router.delete('/:id', authenticateUser,
-    authorizePermissions('admin'), deletePreparationStep); // Delete a preparation step
+router.post('/', ...adminOnly, createPreparationStep); // Create a new preparation step
+router.get('/', ...adminOnly, getPreparationSteps); // Get all preparation steps (with optional skill level filter)
+router.get('/:id', ...adminOnly, getPreparationStepById); // Get a single preparation step by ID
+router.patch('/:id', ...adminOnly, updatePreparationStep); // Update a preparation step
+router.delete('/:id', ...adminOnly, deletePreparationStep); // Delete a preparation step
 
-router.delete('/meal/:mealId', authenticateUser, deletePreparationStepsByMeal);
+router.delete('/meal/:mealId', ...adminOnly, deletePreparationStepsByMeal); // Delete all of a meal's steps
 
 export default router;

@@ -1,5 +1,4 @@
 import { Router } from "express";
-import express from 'express';
 import { register, login, logout, handleGoogleAuth, revokeGoogleAccess } from '../controllers/authController.js';
 import { authenticateUser } from '../middleware/authMiddleware.js';
 import { google } from 'googleapis';
@@ -9,8 +8,10 @@ const router = Router();
 
 const apiLimiter = rateLimiter({
     windowMs: 15 * 60 * 1000,
-    max: 15,
-    message: { msg: 'IP rate limit exceeded, retry in 15 minutes' },
+    limit: 15,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { msg: 'IP rate limit exceeded, retry in 15 minutes', message: 'IP rate limit exceeded, retry in 15 minutes' },
 });
 
 router.post('/register', apiLimiter, register);

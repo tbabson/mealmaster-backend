@@ -1,6 +1,3 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
 // Email setup for Brevo (transactional email HTTP API)
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 

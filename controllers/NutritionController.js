@@ -54,7 +54,8 @@ export const generateMealNutrition = async (req, res) => {
 // @route   POST /api/v1/nutrition/backfill
 // @access  admin
 export const backfillNutrition = async (req, res) => {
-  const limit = Number(req.query.limit) || 10;
+  // Each meal is one sequential OpenAI call — keep a single request bounded
+  const limit = Math.min(Math.max(1, Number(req.query.limit) || 10), 50);
 
   try {
     const meals = await Meal.find({
@@ -96,13 +97,8 @@ export const backfillNutrition = async (req, res) => {
 // @route   GET /api/v1/nutrition/profile
 // @access  session
 export const getNutritionProfile = async (req, res) => {
-  try {
-    const profile = await buildNutritionProfile(req.user.userId);
-    res.status(StatusCodes.OK).json({ profile, disclaimer: DISCLAIMER });
-  } catch (error) {
-    console.error('Nutrition profile failed:', error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
-  }
+  const profile = await buildNutritionProfile(req.user.userId);
+  res.status(StatusCodes.OK).json({ profile, disclaimer: DISCLAIMER });
 };
 
 // @desc    Meal recommendations driven by the caller's nutritional history

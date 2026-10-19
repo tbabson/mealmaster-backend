@@ -74,7 +74,9 @@ const ReminderSchema = new mongoose.Schema(
 );
 
 // Index for efficient queries on calendar-related fields
-ReminderSchema.index({ calendarEventId: 1 });
+// (calendarEventId is already indexed by `sparse: true` on the field)
 ReminderSchema.index({ calendarSyncStatus: 1 });
+// The scheduler loads every pending reminder at boot
+ReminderSchema.index({ notified: 1, reminderTime: 1 });
 
 export default mongoose.model('Reminder', ReminderSchema);

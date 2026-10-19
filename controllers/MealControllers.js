@@ -1,101 +1,69 @@
 import Meal from '../models/MealModel.js';
 import { StatusCodes } from 'http-status-codes';
 import cloudinary from 'cloudinary';
-import fs from 'fs/promises';
-import path from 'path'
-import { query } from 'express';
+import { BadRequestError, NotFoundError } from '../errors/customErrors.js';
+import { containsFilter } from '../utils/escapeRegex.js';
+import { getPagination } from '../utils/pagination.js';
+import { removeTempFile } from '../utils/files.js';
 
+// Fields an admin may set directly. Image ids, ratings and nutrition are server-managed.
+const EDITABLE_FIELDS = ['name', 'mealType', 'country', 'dietary', 'ingredients', 'preparationSteps', 'isRecommended'];
 
+const pickEditable = (body) =>
+    Object.fromEntries(EDITABLE_FIELDS.filter((f) => body[f] !== undefined).map((f) => [f, body[f]]));
 
-
-
+// @desc    Create a meal (admin)
+// @route   POST /api/v1/meals
 export const createMeal = async (req, res) => {
     try {
-        const { name, mealType, ingredients, country, dietary, preparationSteps, isRecommended } = req.body;
-
-        // Check if the image file is present
         if (!req.file) {
-            return res
-                .status(StatusCodes.BAD_REQUEST)
-                .json({ message: 'Please upload a meal image' });
+            throw new BadRequestError('Please upload a meal image');
         }
 
-        // Upload image to Cloudinary
         const result = await cloudinary.v2.uploader.upload(req.file.path, {
             folder: 'mealmaster',
             use_filename: true,
         });
 
-        // Get the absolute path of the uploaded file
-        const filePath = path.resolve(req.file.path);
-
-        // Create the new meal in the database
         const meal = await Meal.create({
-            name,
-            mealType,
-            country,
-            dietary,
-            preparationSteps,
-            isRecommended,
+            ...pickEditable(req.body),
             image: result.secure_url,
             cloudinaryId: result.public_id,
             createdBy: req.user.userId,
         });
 
-        // Update the meal's ingredients field
-        await Meal.findByIdAndUpdate(
-            meal._id,
-            { ingredients: ingredients },
-            { new: true }
-        );
-
-        // Remove local file after everything else is done
-        try {
-            await fs.unlink(filePath);
-        } catch (unlinkError) {
-            console.error(`Error deleting local file: ${filePath}`, unlinkError);
-            // Continue with the request even if file deletion fails
-        }
-
-        // Respond with the created meal
-        const updatedMeal = await Meal.findById(meal._id)
+        const createdMeal = await Meal.findById(meal._id)
             .populate('ingredients')
             .populate('preparationSteps');
 
-        res.status(StatusCodes.CREATED).json({ meal: updatedMeal });
-
-    } catch (error) {
-        console.error('Error creating meal:', error);
-        res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({ message: error.message });
+        res.status(StatusCodes.CREATED).json({ meal: createdMeal });
+    } finally {
+        await removeTempFile(req.file);
     }
 };
 
 // @desc    Get all meals
-// @route   GET /api/meals
+// @route   GET /api/v1/meals
 export const getAllMeals = async (req, res) => {
     const { name, country, mealType, dietary, sort } = req.query
 
     const queryObject = {}
 
+    // Independent filters — previously `country` overwrote the `name` filter
     if (name) {
-        queryObject.$or = [
-            { name: { $regex: name, $options: 'i' } },
-        ]
+        queryObject.name = containsFilter(name)
     }
 
     if (country) {
-        queryObject.$or = [
-            { country: { $regex: country, $options: 'i' } },
-        ]
+        queryObject.country = containsFilter(country)
     }
 
-
     if (mealType && mealType !== 'all') {
-        queryObject.mealType = mealType
+        queryObject.mealType = String(mealType)
     }
 
     if (dietary && dietary !== 'all') {
-        queryObject.dietary = dietary
+        queryObject.dietary = String(dietary)
     }
 
     const sortOptions = {
@@ -106,128 +74,90 @@ export const getAllMeals = async (req, res) => {
     }
 
     const sortKey = sortOptions[sort] || sortOptions.newest;
+    const { page, limit, skip } = getPagination(req.query);
 
-    // setup pagination
+    const meals = await Meal.find(queryObject).populate('ingredients').sort(sortKey).skip(skip).limit(limit)
 
-    const page = Number(req.query.page) || 1
-    const limit = Number(req.query.limit) || 10
-    const skip = (page - 1) * limit
+    const totalMeals = await Meal.countDocuments(queryObject)
+    const numOfPages = Math.ceil(totalMeals / limit)
 
-    try {
-        const meals = await Meal.find(queryObject).populate('ingredients').sort(sortKey).skip(skip).limit(limit)
-
-        const totalMeals = await Meal.countDocuments(queryObject)
-        const numOfPages = Math.ceil(totalMeals / limit)
-
-        res.status(StatusCodes.OK).json({ totalMeals, numOfPages, currentPage: page, meals, count: meals.length })
-    } catch (error) {
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
-    }
+    res.status(StatusCodes.OK).json({ totalMeals, numOfPages, currentPage: page, meals, count: meals.length })
 };
 
 
 // @desc    Get meal by ID
-// @route   GET /api/meals/:id
+// @route   GET /api/v1/meals/:id
 export const getMealById = async (req, res) => {
-    try {
-        // Fetch the meal by ID and populate associated ingredients and preparation steps
-        const meal = await Meal.findById(req.params.id)
-            .populate('ingredients') // Populating ingredients associated with the meal
-            .populate('preparationSteps') // Populating preparation steps
-            .populate({
-                path: 'reviews',
-                populate: {
-                    path: 'user',
-                    select: 'fullName',
-                },
-            });
+    const meal = await Meal.findById(req.params.id)
+        .populate('ingredients')
+        .populate('preparationSteps')
+        .populate({
+            path: 'reviews',
+            populate: {
+                path: 'user',
+                select: 'fullName',
+            },
+        });
 
-        // Check if the meal was found
-        if (!meal) {
-            return res
-                .status(StatusCodes.NOT_FOUND)
-                .json({ message: 'Meal not found' });
-        }
-
-        // Return the populated meal data
-        res.status(StatusCodes.OK).json({ meal });
-    } catch (error) {
-        console.log(error);
-
-        // Handle any errors that occur during the fetch
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
+    if (!meal) {
+        throw new NotFoundError('Meal not found');
     }
+
+    res.status(StatusCodes.OK).json({ meal });
 };
 
-// @desc    Update meal
-// @route   PUT /api/meals/:id
+// @desc    Update meal (admin)
+// @route   PATCH /api/v1/meals/:id
 export const updateMeal = async (req, res) => {
     try {
         const meal = await Meal.findById(req.params.id);
         if (!meal) {
-            return res
-                .status(StatusCodes.NOT_FOUND)
-                .json({ message: 'Meal not found' });
+            throw new NotFoundError('Meal not found');
         }
+
+        const updates = pickEditable(req.body);
+        let oldCloudinaryId;
 
         // If a new image is uploaded, replace the old one in Cloudinary
         if (req.file) {
-            if (meal.cloudinaryId) {
-                await cloudinary.v2.uploader.destroy(meal.cloudinaryId);
-            }
             const result = await cloudinary.v2.uploader.upload(req.file.path, {
                 folder: 'mealmaster',
                 use_filename: true,
             });
-            req.body.image = result.secure_url;
-            req.body.cloudinaryId = result.public_id;
-
-            // Remove the temp local file
-            try {
-                await fs.unlink(path.resolve(req.file.path));
-            } catch (unlinkError) {
-                console.error('Error deleting temp file:', unlinkError);
-            }
+            oldCloudinaryId = meal.cloudinaryId;
+            updates.image = result.secure_url;
+            updates.cloudinaryId = result.public_id;
         }
 
-        const updatedMeal = await Meal.findByIdAndUpdate(req.params.id, req.body, {
+        const updatedMeal = await Meal.findByIdAndUpdate(req.params.id, updates, {
             new: true,
             runValidators: true,
         });
 
+        // Only remove the old image once the new one is stored
+        if (oldCloudinaryId) {
+            await cloudinary.v2.uploader.destroy(oldCloudinaryId);
+        }
+
         res.status(StatusCodes.OK).json({ updatedMeal });
-    } catch (error) {
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
+    } finally {
+        await removeTempFile(req.file);
     }
 };
 
-// @desc    Delete meal
-// @route   DELETE /api/meals/:id
+// @desc    Delete meal (admin) — the model hook removes its reviews, ingredients and steps
+// @route   DELETE /api/v1/meals/:id
 export const deleteMeal = async (req, res) => {
-    try {
-        const meal = await Meal.findById(req.params.id);
-        if (!meal) {
-            return res
-                .status(StatusCodes.NOT_FOUND)
-                .json({ message: 'Meal not found' });
-        }
-
-        // Delete the image from Cloudinary
-        await cloudinary.v2.uploader.destroy(meal.cloudinaryId);
-
-        // Delete the meal from the database
-        await meal.deleteOne();
-
-        res.status(StatusCodes.OK).json({ message: 'Meal deleted successfully' });
-    } catch (error) {
-        res
-            .status(StatusCodes.INTERNAL_SERVER_ERROR)
-            .json({ message: error.message });
+    const meal = await Meal.findById(req.params.id);
+    if (!meal) {
+        throw new NotFoundError('Meal not found');
     }
+
+    await meal.deleteOne();
+
+    if (meal.cloudinaryId) {
+        await cloudinary.v2.uploader.destroy(meal.cloudinaryId);
+    }
+
+    res.status(StatusCodes.OK).json({ message: 'Meal deleted successfully' });
 };

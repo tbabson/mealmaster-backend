@@ -1,5 +1,11 @@
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import { ORDERS, DELIVERY } from "../utils/constants.js"
+
+// 10 hex chars from a CSPRNG: not guessable, and collisions are negligible
+// (the old 5-digit Math.random number collided after a few hundred orders).
+export const generateTrackingNumber = () =>
+    `TRACK${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
 
 
 const OrderSchema = new mongoose.Schema(
@@ -104,9 +110,7 @@ const OrderSchema = new mongoose.Schema(
         },
         trackingNumber: {
             type: String,
-            default: function () {
-                return `TRACK${Math.floor(Math.random() * 100000)}`;
-            },
+            default: generateTrackingNumber,
         },
         transactionId: {
             type: String

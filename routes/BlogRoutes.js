@@ -8,45 +8,24 @@ import {
     addComment,
     deleteComment
 } from '../controllers/BlogController.js';
-import { authenticateUser, authorizePermissions } from '../middleware/authMiddleware.js';
-import multer from 'multer';
-import path from 'path';
+import { authenticateUser, authorizePermissions, attachUserIfPresent } from '../middleware/authMiddleware.js';
+import upload from '../middleware/multer.js';
 
 const router = express.Router();
 
-// Configure multer for image upload
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, './uploads/');
-    },
-    filename: function (req, file, cb) {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    }
-});
-
-const upload = multer({
-    storage,
-    limits: { fileSize: 1024 * 1024 * 5 }, // 5MB limit
-    fileFilter: (req, file, cb) => {
-        const filetypes = /jpeg|jpg|png|webp/;
-        const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-        const mimetype = filetypes.test(file.mimetype);
-        if (mimetype && extname) {
-            return cb(null, true);
-        }
-        cb(new Error('Only images are allowed!'));
-    }
-});
+// Only admins create posts, so only admins edit or delete them.
+// Auth always runs before multer, so anonymous requests never write to disk.
+const adminOnly = [authenticateUser, authorizePermissions('admin')];
 
 // Blog Routes
 router.route('/')
-    .post(authenticateUser, authorizePermissions("admin"), upload.single('featuredImage'), createBlog)
-    .get(getAllBlogs);
+    .post(...adminOnly, upload.single('featuredImage'), createBlog)
+    .get(attachUserIfPresent, getAllBlogs);
 
 router.route('/:id')
     .get(getBlog)
-    .patch(authenticateUser, upload.single('featuredImage'), updateBlog)
-    .delete(authenticateUser, deleteBlog);
+    .patch(...adminOnly, upload.single('featuredImage'), updateBlog)
+    .delete(...adminOnly, deleteBlog);
 
 // Comment Routes
 router.post('/:id/comments', authenticateUser, addComment);

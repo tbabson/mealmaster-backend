@@ -22,11 +22,11 @@ A full-stack meal planning and food e-commerce platform built with Node.js, Expr
 
 ### User-Facing
 
-- **Authentication** — Register/login with email & password or Google OAuth
+- **Authentication** — Register/login with email & password (Google OAuth is used only to connect Google Calendar)
 - **Meal Discovery** — Browse and filter meals by type (Breakfast, Lunch, Dinner, Dessert, Snack, Junk) and dietary preference (vegan, vegetarian, gluten-free, halal, kosher)
 - **Meal Details** — View ingredients, preparation steps, ratings, and reviews per meal
 - **Shopping Cart** — Persistent cart synced between localStorage and server for authenticated users
-- **Checkout & Payments** — Supports Stripe, PayPal, and Bank Transfer
+- **Checkout & Payments** — Supports Stripe and Bank Transfer. Prices, tax (10%) and shipping are always computed on the server from the catalogue
 - **Order Tracking** — Full order lifecycle: Pending → Processing → Processed → Delivered/Cancelled with delivery status updates
 - **Meal Reminders** — Schedule one-time or recurring (daily, weekly, monthly) meal reminders delivered via email, push notification, or Google Calendar events
 - **Shopping Lists** — Generate shopping lists from meals and track purchased items
@@ -59,9 +59,9 @@ A full-stack meal planning and food e-commerce platform built with Node.js, Expr
 | Runtime            | Node.js (ES Modules)                                         |
 | Framework          | Express.js 4.21                                              |
 | Database           | MongoDB with Mongoose 8.7                                    |
-| Authentication     | JWT + Google OAuth2                                          |
-| Payments           | Stripe 17.7, PayPal SDK                                      |
-| File Uploads       | Cloudinary, Multer, express-fileupload                       |
+| Authentication     | JWT (HTTP-only cookie); Google OAuth2 for Calendar access    |
+| Payments           | Stripe 17.7, bank transfer                                   |
+| File Uploads       | Cloudinary, Multer                                           |
 | Email              | Brevo transactional email API                                |
 | AI                 | OpenAI (nutrition estimation & recommendations)              |
 | Push Notifications | web-push (VAPID)                                             |
@@ -107,10 +107,9 @@ mealmaster/
 │   ├── ReminderController.js
 │   ├── ReviewController.js
 │   ├── paymentControllers.js
-│   ├── DeliveryController.js
 │   ├── shoppingListController.js
 │   ├── NutritionController.js   # Nutrition estimation & recommendations
-│   └── ScheduleReminders.js     # Cron job runner
+│   └── ScheduleReminders.js     # Reminder scheduler (node-schedule)
 │
 ├── routes/                      # API route definitions
 │   ├── authRoutes.js
@@ -135,19 +134,23 @@ mealmaster/
 │   ├── BlogModel.js
 │   ├── ReviewModel.js
 │   ├── IngredientsModel.js
-│   ├── DeliveryModel.js
+│   ├── PrepStepModel.js
+│   ├── shoppingListModel.js
 │   ├── SubscriptionModel.js
-│   ├── NutritionRecommendationModel.js  # Cached AI recommendations, per user
-│   └── HealthGoalModel.js
+│   └── NutritionRecommendationModel.js  # Cached AI recommendations, per user
 │
 ├── middleware/
-│   ├── authMiddleware.js        # JWT verification & role checks
+│   ├── authMiddleware.js        # JWT verification, role & ownership checks
+│   ├── googleAuthMiddleware.js  # Requires a connected Google Calendar
 │   ├── errorHandlerMiddleware.js
-│   ├── multer.js
-│   └── validationMiddleware.js
+│   └── multer.js                # Temp image uploads (→ Cloudinary)
 │
 ├── utils/
 │   ├── constants.js             # Enums for meal types, order statuses, etc.
+│   ├── pricing.js               # Server-side cart pricing, tax & shipping
+│   ├── escapeRegex.js           # Safe user search → $regex
+│   ├── pagination.js
+│   ├── files.js                 # Temp upload cleanup
 │   ├── cloudinary.js
 │   ├── tokenUtils.js
 │   ├── passwordUtils.js
@@ -157,6 +160,7 @@ mealmaster/
 │   └── sitemapGenerator.js
 │
 ├── errors/                      # Custom error classes
+├── test/                        # node:test unit tests (npm test)
 │
 └── client/                      # React frontend
     ├── vite.config.js           # Dev proxy → http://localhost:5000/api
@@ -176,9 +180,9 @@ mealmaster/
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+ (22+ to run `npm test`)
 - MongoDB Atlas account (or local MongoDB instance)
-- Accounts for Cloudinary, Stripe, and Google Cloud (for OAuth & Calendar)
+- Accounts for Cloudinary, Stripe, and Google Cloud (for Calendar sync)
 
 ### Installation
 
@@ -220,7 +224,7 @@ Create a `.env` file in the backend root. It is gitignored — never commit real
 | `MONGO_URL` | ✅ | MongoDB connection string. |
 | `JWT_SECRET` | ✅ | Signing secret for auth tokens. |
 | `JWT_EXPIRES_IN` | ✅ | Token lifetime, e.g. `1d`. |
-| `CLIENT_URL` | ✅ | Frontend origin. Used for CORS and OAuth/Stripe redirects. |
+| `CLIENT_URL` | ✅ | Frontend origin(s) allowed by CORS, comma-separated (e.g. `https://mealmaster-nine.vercel.app,https://www.example.com`). No trailing slash needed. The first entry is used for OAuth/Stripe redirects. |
 | `CLOUD_NAME`, `CLOUD_API_KEY`, `CLOUD_API_SECRET` | ✅ | Cloudinary image hosting. |
 | `BREVO_API_KEY` | ✅ | Brevo transactional email. |
 | `BREVO_SENDER_EMAIL` | ✅ | Must be a **verified sender** or on a Brevo-authenticated domain, or sends fail with `400`. |
@@ -228,9 +232,12 @@ Create a `.env` file in the backend root. It is gitignored — never commit real
 | `BREVO_REPLY_TO` | — | Reply-to address; falls back to the sender. |
 | `OPENAI_API_KEY` | — | Required only for nutrition features. Without it the server still boots and only `/nutrition` routes fail, with a `503`. |
 | `OPENAI_MODEL` | — | Defaults to `gpt-4o-mini`. Set to any model your account can access. |
-| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✅ | Stripe payments and webhook signature verification. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | ✅ | Google OAuth and Calendar sync. |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | ✅ | Web Push signing key pair. |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | ✅ | Stripe payments and webhook signature verification. Subscribe the webhook to `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.expired` (the last one removes abandoned checkout orders). |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` | ✅ | Google Calendar sync (OAuth consent for calendar access). |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | ✅ | Web Push signing key pair. Without them the server still boots, with push disabled. |
+| `VAPID_SUBJECT` | — | `mailto:` or URL contact sent to push services. |
+| `MISSED_REMINDER_GRACE_MINUTES` | — | On boot, reminders that came due while the server was down are still sent if at most this many minutes late (default `60`). Older one-off reminders are skipped; recurring ones move to their next occurrence. |
+| `DNS_SERVERS` | — | Comma-separated DNS servers for the process. Defaults to Google DNS in development (for networks that cannot resolve Atlas SRV records) and to the host resolver in production. |
 
 ### Frontend
 
@@ -251,7 +258,7 @@ All endpoints are prefixed with `/api/v1`, except `/`, `/health`, and `/sitemap.
 
 | Prefix              | Resource                                 |
 | ------------------- | ---------------------------------------- |
-| `/auth`             | Register, login, Google OAuth, logout    |
+| `/auth`             | Register, login, logout, Google Calendar connect |
 | `/meals`            | Meal CRUD, filtering, search             |
 | `/blogs`            | Blog posts, comments                     |
 | `/orders`           | Create and retrieve orders               |
@@ -259,7 +266,7 @@ All endpoints are prefixed with `/api/v1`, except `/`, `/health`, and `/sitemap.
 | `/reminders`        | Schedule and manage meal reminders       |
 | `/users`            | User profile, preferences, order history |
 | `/reviews`          | Meal reviews and ratings                 |
-| `/payment`          | Stripe payment intent, webhook handler   |
+| `/payment`          | Stripe checkout session, bank transfer, webhook |
 | `/ingredients`      | Ingredient management                    |
 | `/preparationSteps` | Preparation step sequences               |
 | `/shoppingLists`    | Shopping list CRUD                       |
@@ -270,6 +277,16 @@ All endpoints are prefixed with `/api/v1`, except `/`, `/health`, and `/sitemap.
 ---
 
 ## Scripts
+
+Backend (this directory):
+
+| Command         | Description                          |
+| --------------- | ------------------------------------ |
+| `npm start`     | Start the API                        |
+| `npm run dev`   | Start the API with nodemon           |
+| `npm test`      | Run unit tests (`node:test`)         |
+
+Monorepo root:
 
 | Command                        | Description                                            |
 | ------------------------------ | ------------------------------------------------------ |
@@ -297,9 +314,7 @@ Frontend-only scripts (run from `client/`):
 | **MongoDB Atlas**       | Cloud-hosted database                              |
 | **Cloudinary**          | Image hosting and optimization for meals and blogs |
 | **Stripe**              | Secure payment processing with webhook support     |
-| **PayPal**              | Alternative payment method                         |
-| **Google OAuth2**       | Social login                                       |
-| **Google Calendar API** | Sync meal reminders as calendar events             |
+| **Google Calendar API** | Sync meal reminders as calendar events (OAuth2)    |
 | **Brevo**               | Transactional email (meal reminders)                |
 | **OpenAI**              | Nutrition estimation and personalised recommendations |
 | **Web Push API**        | PWA push notifications                             |
@@ -310,10 +325,15 @@ Frontend-only scripts (run from `client/`):
 
 - **Password hashing** — bcryptjs with salt rounds
 - **JWT authentication** — Short-lived tokens with HTTP-only cookies
-- **Rate limiting** — 15 requests per 15 minutes on auth endpoints
-- **Input sanitization** — express-mongo-sanitize prevents NoSQL injection
+- **Rate limiting** — 15 requests per 15 minutes on auth endpoints, 500 per 15 minutes across the API, and per-user limits on OpenAI-backed routes (`trust proxy` is set so limits apply per client behind Render's proxy)
+- **Input sanitization** — express-mongo-sanitize strips `$` operators from request data; search terms are regex-escaped before reaching `$regex`
 - **Security headers** — Helmet sets safe HTTP response headers
 - **CORS** — Configured explicitly for allowed origins
 - **Role-based access** — Admin routes protected at both the API and frontend routing layers
-- **Stripe webhook verification** — Signature validation on all webhook events
+- **Ownership checks** — users can only read or change their own carts, orders, reminders, shopping lists and profile; admins can access all
+- **Mass-assignment protection** — profile, blog and meal updates accept an explicit field list; `role` and Google tokens are never settable from a request
+- **Server-side pricing** — order and Stripe totals are computed from catalogue prices, never from client-sent amounts
+- **Secrets stay server-side** — `googleRefreshToken` is excluded from every query and JSON response
+- **Error hygiene** — 5xx responses in production return a generic message; details go to the logs
+- **Stripe webhook verification** — Signature validation on all webhook events; payment updates are idempotent
 - **XSS protection** — DOMPurify sanitizes any rendered HTML on the frontend
