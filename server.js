@@ -184,8 +184,31 @@ app.use(errorHandlerMiddleware);
 
 const port = process.env.PORT || 8000;
 
+// A single dropped TLS handshake to Atlas (MongoNetworkError ECONNRESET) used to
+// kill the process at boot. Retry with backoff before giving up.
+const connectWithRetry = async (attempts = 6) => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await mongoose.connect(process.env.MONGO_URL, { serverSelectionTimeoutMS: 15000 });
+      return;
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      const delay = Math.min(2000 * 2 ** (attempt - 1), 30000);
+      console.warn(
+        `MongoDB connection failed (${error.name}: ${error.message.split('\n')[0]}). ` +
+        `Retrying in ${delay / 1000}s (${attempt}/${attempts - 1})...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+};
+
+// After boot the driver reconnects on its own; just make outages visible in the logs
+mongoose.connection.on('disconnected', () => console.warn('MongoDB disconnected — the driver will keep retrying'));
+mongoose.connection.on('reconnected', () => console.log('MongoDB reconnected'));
+
 try {
-  await mongoose.connect(process.env.MONGO_URL);
+  await connectWithRetry();
   await initializeReminderSystem(); // Start the reminder scheduler (needs an open DB connection)
   app.listen(port, '0.0.0.0', () => {
     console.log(`server running on PORT ${port}...`);
